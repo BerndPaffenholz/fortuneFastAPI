@@ -11,19 +11,12 @@ installiert. Außerdem wollte ich einen Service programmieren.
 * Lösung
 
 Die Datenbasis sollte die gleiche wie für das Programm =fortune=
-sein. Die aktuelle Quelle ist das [[https://github.com/shlomif/fortune-mod][Projekt fortune-mod]].
+sein. Die aktuelle Quelle ist das [[https://github.com/shlomif/fortune-mod][Projekt fortune-mod]].  Ich verwende
+aber einen [[https://github.com/BerndPaffenholz/fortune-mod.git][Klon]], den ich kontrollieren kann, damit ich Ergänzungen
+oder Streichungen vornehmen kann.
 
-Die Textdateien mit den Zitaten in eine Datenbank einstellen. Der
-Service ließt aus der Datenbank.
-
-#+begin_src python
-from pymongo import MongoClient
-client = MongoClient("mongodb://localhost:27017/",username="root",password="example");
-return client.fortune.list_collection_names()
-#+end_src
-
-#+RESULTS:
-| config | sayings |
+Die Textdateien mit den Zitaten werden in eine Datenbank geladen. Der
+Service liest aus der Datenbank.
 
 ** Anwendung und REST-Schnitstelle
 
@@ -38,12 +31,12 @@ app = Flask(__name__, instance_relative_config=True)
 api = Api(app,
           title='Fortune - Cookies',
           endpoint='/fortunes',
-          doc='/rest/',
+          doc='/fortunes/doc/',
           default='fortunes', default_label='All the wisdom of the world.',
           version='v1',
-          description='''Every one goes with a quote. \
-          See <a href="https://linux.die.net/man/6/fortune">fortune</a>, \
-          Quotes are from <a href="https://github.com/shlomif/fortune-mod">fortune-mod</a>.''')
+          description='''Every one goes with a quote. See <a href="https://linux.die.net/man/6/fortune">fortune</a>.
+          Quotes are from <a href="https://github.com/BerndPaffenholz/fortune-mod.git">here</a> \
+          which is a clone from <a href="https://github.com/shlomif/fortune-mod">fortune-mod</a>.''')
 
 cites.init_app(app)
 from tasks import run_update_db
@@ -208,6 +201,15 @@ def init_app(app):
 
 #+RESULTS:
 
+#+begin_src python
+from pymongo import MongoClient
+client = MongoClient("mongodb://localhost:27017/",username="root",password="example");
+return client.fortune.list_collection_names()
+#+end_src
+
+#+RESULTS:
+| config | sayings |
+
 ** Refresh der Datenbank
 
 #+begin_src python :results verbatim :tangle "app/cites.py"
@@ -249,9 +251,6 @@ def walk_files_and_load ():
     return stats
 #+end_src
 
-#+RESULTS:
-: {'computers': 1065, 'riddles': 127, 'men-women': 583, 'literature': 263, 'disclaimer': 284, 'debian': 85, 'love': 150, 'magic': 30, 'drugs': 207, 'pets': 52, 'art': 474, 'perl': 273, 'law': 206, 'goedel': 54, 'education': 205, 'ethnic': 162, 'science': 626, 'ascii-art': 10, 'knghtbrd': 540, 'miscellaneous': 651, 'sports': 147, 'zippy': 548, 'politics': 704, 'startrek': 227, 'wisdom': 432, 'news': 53, 'linux': 401, 'work': 630, 'medicine': 74, 'people': 1251, 'food': 197, 'humorists': 198, 'platitudes': 498, 'pratchett': 3, 'cookie': 1147, 'songs-poems': 720, 'definitions': 1203, 'kids': 151, 'fortunes': 431, 'translate-me': 12, 'paradoxum': 72, 'tao': 82}
-
 
 #+begin_src python :tangle "app/cites.py"
 from subprocess import check_output, call
@@ -286,7 +285,7 @@ RUN pip install --no-cache-dir --upgrade flask-restx
 RUN pip install --no-cache-dir --upgrade pymongo
 RUN pip install --no-cache-dir --upgrade celery
 
-RUN cd /;git clone https://github.com/shlomif/fortune-mod.git
+RUN cd /;git clone https://github.com/BerndPaffenholz/fortune-mod.git
 
 COPY ./app /app
 #+end_src
@@ -294,7 +293,7 @@ COPY ./app /app
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash
-docker build --quiet --force-rm --tag fortuned .
+docker build --quiet --force-rm --tag berndpaffenholz/fortuned:0.1 .
 #+end_src
 
 #+RESULTS:
@@ -429,12 +428,10 @@ services:
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.fortune.entrypoints=web-secure"
-#      - "traefik.http.routers.fortune.rule=Host(`p4ffi.de`) && (PathPrefix(`/rest/`) || PathPrefix(`/swaggerui/`) || PathPrefix(`/swagger.json`))"
-      - "traefik.http.routers.fortune.rule=Host(`p4ffi.de`) && PathPrefix(`/rest/`)"
+      - "traefik.http.routers.fortune.rule=Host(`api.p4ffi.de`)"
       - "traefik.http.routers.fortune.tls=true"
-      - "traefik.http.middlewares.stripapi.stripprefix.prefixes=/rest"
-      - "traefik.http.middlewares.stripapi.stripprefix.forceSlash=true"
-      - "traefik.http.routers.fortune.middlewares=stripapi@docker"
+      - "traefik.http.routers.fortune.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fortune.tls.domains[0].main=api.p4ffi.de"
       - "traefik.http.services.fortune.loadbalancer.server.port=80"
     depends_on:
       - mongo
@@ -461,13 +458,13 @@ services:
 #+end_src
 
 # Das tangeln nicht vergessen!
-#+begin_src bash :results output
+#+begin_src bash :results output :var not_needed=(org-babel-tangle)
 docker build --quiet --force-rm --tag berndpaffenholz/fortuned:0.1 .
-docker compose up -d
+docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml up -d
 #+end_src
 
 #+RESULTS:
-: sha256:51db5930868aa14f5a88409e68d3a9ce479606fdb176707f409881f9b9a91a19
+: sha256:df997805a364a914c2457eb3126ac5ab981505313378ce83ee0a0b7ab378828a
 
 #+begin_src bash
 docker compose down
@@ -477,8 +474,8 @@ docker compose down
 
 * Test
 
-Es gibt keine Möglichkeit in Org bedingt zu generieren. Daher die
-Auslagerung von Testhilfsmitteln in ein eigenes Dockerfile.
+Die Testhilfen werden in eigene Dockerfiles auslagert. Diese können
+beim Aufruf mittels =-f= kombiniert werden.
 
 #+begin_src docker-compose :tangle docker-compose-test-mongo.yml 
 services:
@@ -494,26 +491,6 @@ services:
       ME_CONFIG_MONGODB_ADMINPASSWORD: example
       ME_CONFIG_MONGODB_URL: "mongodb://root:example@mongo:27017/"
 #+end_src
-
-
-#+begin_src python :results verbatim
-from pathlib import Path
-source = Path('./fortune-mod/fortune-mod/datfiles')
-test = [f for f in source.iterdir() if f.is_file() and f.suffix == ""]
-return test
-#+end_src
-
-#+RESULTS:
-: [PosixPath('fortune-mod/fortune-mod/datfiles/computers'), PosixPath('fortune-mod/fortune-mod/datfiles/riddles'), PosixPath('fortune-mod/fortune-mod/datfiles/men-women'), PosixPath('fortune-mod/fortune-mod/datfiles/literature'), PosixPath('fortune-mod/fortune-mod/datfiles/disclaimer'), PosixPath('fortune-mod/fortune-mod/datfiles/debian'), PosixPath('fortune-mod/fortune-mod/datfiles/love'), PosixPath('fortune-mod/fortune-mod/datfiles/magic'), PosixPath('fortune-mod/fortune-mod/datfiles/drugs'), PosixPath('fortune-mod/fortune-mod/datfiles/pets'), PosixPath('fortune-mod/fortune-mod/datfiles/art'), PosixPath('fortune-mod/fortune-mod/datfiles/perl'), PosixPath('fortune-mod/fortune-mod/datfiles/law'), PosixPath('fortune-mod/fortune-mod/datfiles/goedel'), PosixPath('fortune-mod/fortune-mod/datfiles/education'), PosixPath('fortune-mod/fortune-mod/datfiles/ethnic'), PosixPath('fortune-mod/fortune-mod/datfiles/science'), PosixPath('fortune-mod/fortune-mod/datfiles/ascii-art'), PosixPath('fortune-mod/fortune-mod/datfiles/knghtbrd'), PosixPath('fortune-mod/fortune-mod/datfiles/miscellaneous'), PosixPath('fortune-mod/fortune-mod/datfiles/sports'), PosixPath('fortune-mod/fortune-mod/datfiles/zippy'), PosixPath('fortune-mod/fortune-mod/datfiles/politics'), PosixPath('fortune-mod/fortune-mod/datfiles/startrek'), PosixPath('fortune-mod/fortune-mod/datfiles/wisdom'), PosixPath('fortune-mod/fortune-mod/datfiles/news'), PosixPath('fortune-mod/fortune-mod/datfiles/linux'), PosixPath('fortune-mod/fortune-mod/datfiles/work'), PosixPath('fortune-mod/fortune-mod/datfiles/medicine'), PosixPath('fortune-mod/fortune-mod/datfiles/people'), PosixPath('fortune-mod/fortune-mod/datfiles/food'), PosixPath('fortune-mod/fortune-mod/datfiles/humorists'), PosixPath('fortune-mod/fortune-mod/datfiles/platitudes'), PosixPath('fortune-mod/fortune-mod/datfiles/pratchett'), PosixPath('fortune-mod/fortune-mod/datfiles/cookie'), PosixPath('fortune-mod/fortune-mod/datfiles/songs-poems'), PosixPath('fortune-mod/fortune-mod/datfiles/definitions'), PosixPath('fortune-mod/fortune-mod/datfiles/kids'), PosixPath('fortune-mod/fortune-mod/datfiles/fortunes'), PosixPath('fortune-mod/fortune-mod/datfiles/translate-me'), PosixPath('fortune-mod/fortune-mod/datfiles/paradoxum'), PosixPath('fortune-mod/fortune-mod/datfiles/tao')]
-
-* RabbitMQ
-
-#+begin_src bash
-docker run -d -p 5672:5672 rabbitmq
-#+end_src
-
-#+RESULTS:
-: 90bafaead7cf6e0095de9b9bc83ea74fb0e3dee5836331a0eb8b86e49d9772d0
 
 * Celery
 
@@ -553,14 +530,17 @@ celery multi start -A tasks worker -B -s /var/log/celery/celerybeat-schedule --l
 
 * Test                                                             :noexport:
 
-#+begin_src python
-return "e{0} e".format(0)
+* Deploy to target
+
+#+begin_src bash
+docker image push -q berndpaffenholz/fortuned:0.1
+scp -p docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
+ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortuned:0.1 && docker compose up --quiet-pull -d"
 #+end_src
 
 #+RESULTS:
-: e0 e
-
-* Deploy to target
+| docker.io/berndpaffenholz/fortuned:0.1 |
+| docker.io/berndpaffenholz/fortuned:0.1 |
 
 * Local Variables                                                  :noexport:
 # Local Variables:
