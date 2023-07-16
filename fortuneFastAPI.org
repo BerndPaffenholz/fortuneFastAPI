@@ -55,7 +55,7 @@ class StatsEntry(BaseModel):
 Stats = TypeAdapter(StatsEntry)
 
 
-@app.get('/fortunes/v1/', response_model=Cookie, tags=["fortunes"])
+@app.get('/fortunes/v1', response_model=Cookie, tags=["fortunes"])
 def get_one_random_cookie():
     try:
         found = cites.find_one()
@@ -311,17 +311,17 @@ GET https://api.p4ffi.de/fortunes/v1
 : {"text": "Real computer scientists don't program in assembler.  They don't write\nin anything less portable than a number two pencil.\n", "category": "computers"}
 
 #+begin_src http
-POST http://localhost:80/fortunes/v1
+GET http://localhost:80/fortunes/v1
 #+end_src
 
 #+RESULTS:
 : HTTP/1.1 200 OK
-: date: Sat, 15 Jul 2023 21:05:03 GMT
+: date: Sun, 16 Jul 2023 23:07:59 GMT
 : server: uvicorn
-: content-length: 63
+: content-length: 191
 : content-type: application/json
 : 
-: [{"update-task-id":"7375f74b-9fac-4c31-9e15-d942e40c3299"},202]
+: {"text":"I put contact lenses in my dog's eyes.  They had little pictures of cats\non them.  Then I took one out and he ran around in circles.\n\t\t-- Steven Wright\n","category":"humorists"}
 
 #+begin_src http :pretty
 GET https://p4ffi.de/rest/fortunes/v1/categories
@@ -373,6 +373,20 @@ GET https://p4ffi.de/rest/fortunes/v1/categories
 | people        | 1251 | ok | people        | 1251 |
 #+TBLFM: $3=if(($1==$4)&&($2==$5),ok,Abweichung)
 
+#+begin_src http
+POST https://api.p4ffi.de/fortunes/v1
+#+end_src
+
+#+RESULTS:
+: HTTP/2 401 
+: content-type: text/plain
+: www-authenticate: Basic realm="Dashboard"
+: content-length: 17
+: date: Sun, 16 Jul 2023 22:59:58 GMT
+: 
+: 401 Unauthorized
+
+
 ** compose-Datei
 
 Jetzt das Ganze als compose-Datei.
@@ -411,6 +425,10 @@ services:
       - "traefik.http.routers.fortune.tls.certresolver=letsencrypt"
       - "traefik.http.routers.fortune.tls.domains[0].main=api.p4ffi.de"
       - "traefik.http.services.fortune.loadbalancer.server.port=80"
+      - "traefik.http.routers.fortunep.entrypoints=web-secure"
+      - "traefik.http.routers.fortunep.rule=Host(`api.p4ffi.de`) && Method(`POST`)"
+      - "traefik.http.routers.fortunep.middlewares=auth-dashboard"
+      - "traefik.http.routers.fortunep.tls=true"
     depends_on:
       - mongo
       - rabbitmq
@@ -442,7 +460,7 @@ docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compos
 #+end_src
 
 #+RESULTS:
-: sha256:d75263a66481a196520a409fe18199598e452ebab5aabc7593192f5c77679a04
+: sha256:dca1e7f43f52adea1c8e0d892b25c533edf1bdcdf06f979f92da61a0118fd5bf
 
 #+begin_src bash :dir build
 docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml down
@@ -535,7 +553,7 @@ auch eine [[https://fastapi.tiangolo.com/deployment/docker/][Anleitung für ein 
 
 * Deploy to target
 
-#+begin_src bash
+#+begin_src bash :var not_needed=(org-babel-tangle)
 docker image push -q berndpaffenholz/fortunef:0.1
 scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
 ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortunef:0.1 && docker compose up --quiet-pull -d"
