@@ -1,0 +1,608 @@
+#+TITLE: REST-Service für fortune with FastAPI
+
+* Motivation
+
+Nachdem es mir nicht gelungen ist, einen verläßlichen Service für das
+Bereitstellen von "fortunes" zu finden, habe ich einen selbst erstellt.
+
+Es gibt das Programm [[https://linux.die.net/man/6/fortune][=fortune(6)=]], aber das ist nicht immer
+installiert. Außerdem wollte ich einen Service programmieren.
+
+* Lösung
+
+Die Datenbasis sollte die gleiche wie für das Programm =fortune=
+sein. Die aktuelle Quelle ist das [[https://github.com/shlomif/fortune-mod][Projekt fortune-mod]].  Ich verwende
+aber einen [[https://github.com/BerndPaffenholz/fortune-mod.git][Klon]], den ich kontrollieren kann, damit ich Ergänzungen
+oder Streichungen vornehmen kann.
+
+Die Textdateien mit den Zitaten werden in eine Datenbank geladen. Der
+Service liest aus der Datenbank.
+
+** Anwendung und REST-Schnitstelle
+
+#+begin_src python :tangle "build/app/main.py"
+from typing import Union
+
+from fastapi import FastAPI, HTTPException
+from pydantic import BaseModel, TypeAdapter
+
+app = FastAPI()
+
+import logging
+log = logging.getLogger("fortunes")
+log.setLevel(logging.INFO)
+format = logging.Formatter(fmt='%(asctime)s %(levelname)s %(message)s')
+handler = logging.StreamHandler()
+handler.setFormatter(format)
+log.addHandler(handler)
+
+import app.cites as cites
+cites.init_app(app)
+
+
+from app.tasks import run_update_db
+run_update_db_id = run_update_db.delay()
+log.info("Task %s started.",run_update_db_id)
+
+class Cookie(BaseModel):
+    text: str
+    category: str
+
+class StatsEntry(BaseModel):
+    category: str
+    count: int
+
+Stats = TypeAdapter(StatsEntry)
+
+
+@app.get('/fortunes/v1/', response_model=Cookie, tags=["fortunes"])
+def get_one_random_cookie():
+    try:
+        found = cites.find_one()
+        return found
+    except LookupError as l:
+        raise HTTPException(status_code=500, detail="Problem with the database.")
+
+@app.post('/fortunes/v1', tags=["fortunes"])
+def update_fortunes_database():
+    from app.tasks import run_update_db
+    try:
+        log.info("post requested.")
+        result = run_update_db.delay()
+        return {"update-task-id": result.id},202
+    except Exception as l:
+        raise HTTPException(status_code=500, detail="Problem with the workflow.")
+
+        
+@app.get('/fortunes/v1/categories', response_model=dict[str,int], tags=["categories"])
+def get_category_stats():
+    try:
+        return cites.list_categories()
+    except Exception as l:
+        raise HTTPException(status_code=500, detail="Problem with the database.")
+
+        
+@app.get('/fortunes/v1/categories/{category}', response_model=Cookie, tags=["categories"])
+def get_one_random_fortune_fromx_category(category: str):
+    try:
+        return cites.find_one(category)
+    except KeyError as k:
+        raise HTTPException(status_code=404, detail=k.args[0])
+    except LookupError as l:
+        raise HTTPException(status_code=500, detail=l.args[0])
+#+end_src
+
+#+begin_src bash
+python3 -m uvicorn main:app --reload
+#+end_src
+
+#+RESULTS:
+
+** Schnittstelle Datenbank
+
+#+begin_src python :tangle "build/app/cites.py"
+import logging
+log = logging.getLogger("fortunes")
+
+from pymongo import MongoClient
+mongodb = MongoClient("mongodb://mongo:27017/",username="root",password="example")
+databasename = "fortune"
+
+def get_citesdb():
+    global mongodb, databasename
+    try:
+        return mongodb[databasename].sayings
+    except Exception as e:
+        print(e)
+        raise e
+
+def get_confdb():
+    global mongodb, databasename
+    try:
+        return mongodb[databasename].config
+    except Exception as e:
+        print(e)
+        raise e
+
+def close_db(e=None):
+    global mongodb, databasename
+    if mongodb is not None:
+        pass
+
+def find_one (cat=None):
+    citesdb = get_citesdb()
+    if cat == None:
+        query = []
+        keyerror_msg = "Nothing found."
+        error_msg = "Problem with database."
+    else:
+        query = [ { "$match": { "category": cat } } ]
+        keyerror_msg = f"Category '{cat}' not found."
+        error_msg = f"Problem with category '{cat}'."
+    query += [ { "$sample": { "size": 1 } }]
+    try:
+        sample = citesdb.aggregate(query).next()
+        return { k:sample[k] for k in ("text", "category") }
+    except StopIteration :
+        raise KeyError(keyerror_msg)
+    except Exception as e:
+        log.error(e)
+        raise LookupError(error_msg)
+
+def list_categories ():
+    citesdb = get_citesdb()
+    counts = citesdb.aggregate([{ "$group": { "_id": "$category", "count": { "$count": {} } } }])
+    dict = {}
+    for c in counts:
+        dict[c["_id"]] = c["count"]
+    return dict
+
+def init_app(app):
+    # app.teardown_appcontext(close_db)
+    global mongodb, databasename
+    if not (databasename in  mongodb.list_database_names()):
+        log.info("no database")
+        mongodb[databasename].config.insert_one({"name": 'git-commit-id', "value": None})
+        return False
+    else:
+        return True
+
+#+end_src
+
+#+RESULTS:
+
+#+begin_src python
+from pymongo import MongoClient
+client = MongoClient("mongodb://mongo:27017/",username="root",password="example");
+return client.fortune.list_collection_names()
+#+end_src
+
+#+RESULTS:
+| config | sayings |
+
+** Refresh der Datenbank
+
+#+begin_src python :results verbatim :tangle "build/app/cites.py"
+def add_saying_with_category (saying, category):
+    citesdb = get_citesdb()
+    citesdb.insert_one({"category": category, "text": saying })
+
+def remove_category (category):
+    citesdb = get_citesdb()
+    citesdb.delete_many({"category": category })
+
+def read_category_file_add_to_collection (file):
+    count = 0
+    saying = ""
+    category = file.name
+
+    remove_category(category)
+
+    with file.open("r") as fd:
+        for l in fd:
+            if l == "%\n":
+                if saying != "":
+                    count += 1
+                    add_saying_with_category (saying, category)
+                    saying = ""
+            else:
+                saying += l
+
+    return {f"{category}": count}
+
+from pathlib import Path
+
+def walk_files_and_load ():
+    source = Path('/fortune-mod/fortune-mod/datfiles')
+    stats = {}
+    for f in source.iterdir():
+        if f.is_file() and f.suffix == "":
+            stats |= read_category_file_add_to_collection(f)
+    return stats
+#+end_src
+
+
+#+begin_src python :tangle "build/app/cites.py"
+from subprocess import check_output, call
+
+def get_current_git_commit_id ():
+    call(['git', 'pull', '--ff-only'],cwd="/fortune-mod")
+    return check_output(['git', 'log', '-1', '--format=%H'], shell=False, text=True,cwd="/fortune-mod")
+
+def get_db_git_commit_id ():
+    config = get_confdb()
+    return config.find_one({"name":"git-commit-id"})["value"]
+
+def update_from_files ():
+    log.info("Comparing...")
+    git_id = get_current_git_commit_id()
+    if git_id != get_db_git_commit_id ():
+        log.info("Updating...")
+        walk_files_and_load()
+        config = get_confdb()
+        config.update_one({"name":"git-commit-id"}, {"$set":{"value":git_id}})
+#+end_src
+
+#+RESULTS:
+
+
+* Bauen
+
+#+begin_src text :tangle "build/requirements.txt"
+fastapi
+pydantic
+uvicorn
+pymongo
+celery
+#+end_src
+
+#+begin_src dockerfile :tangle "build/dockerfile"
+FROM python:3.11
+WORKDIR /code
+COPY ./requirements.txt /code/requirements.txt
+RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
+COPY ./app /code/app
+RUN cd /;git clone https://github.com/BerndPaffenholz/fortune-mod.git
+CMD ["bash", "-c", "app/start.sh"]
+#+end_src
+
+#+begin_src bash :shebang "#!/bin/bash" :tangle "build/app/start.sh" :noweb yes
+<<pre-start>>
+uvicorn app.main:app --host 0.0.0.0 --port 80
+#+end_src
+
+Nun tanglen wir diese Datei und bauen dann ein Image
+
+#+begin_src bash :dir build
+docker build --quiet --force-rm --tag berndpaffenholz/fortunef:0.1 .
+#+end_src
+
+#+RESULTS:
+: sha256:dbfce115358aec14c0c0698fcde57375a7954060e3566468428c3c2d826c4c3c
+
+#+begin_src bash
+docker run --detach --publish 8000:80 berndpaffenholz/fortunef:0.1
+#+end_src
+
+#+RESULTS:
+: 0dd1084370171289b8f82b2d4b9de35a1bf24fa1305ec2f23e4076aaa776348f
+
+#+begin_src bash :results verbatim
+docker ps
+#+end_src
+
+#+RESULTS:
+: CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                  NAMES
+: 4799aab3c845   99424b76fdeb   "uvicorn app.main:ap…"   9 minutes ago   Up 9 minutes   0.0.0.0:8000->80/tcp   relaxed_swartz
+
+** Testaufrufe
+
+#+begin_src http
+GET https://api.p4ffi.de/fortunes/v1
+#+end_src
+
+#+RESULTS:
+: HTTP/2 200 
+: content-type: application/json
+: date: Sun, 16 Jul 2023 16:11:25 GMT
+: server: nginx/1.23.2
+: content-length: 163
+: 
+: {"text": "Real computer scientists don't program in assembler.  They don't write\nin anything less portable than a number two pencil.\n", "category": "computers"}
+
+#+begin_src http
+POST http://localhost:80/fortunes/v1
+#+end_src
+
+#+RESULTS:
+: HTTP/1.1 200 OK
+: date: Sat, 15 Jul 2023 21:05:03 GMT
+: server: uvicorn
+: content-length: 63
+: content-type: application/json
+: 
+: [{"update-task-id":"7375f74b-9fac-4c31-9e15-d942e40c3299"},202]
+
+#+begin_src http :pretty
+GET https://p4ffi.de/rest/fortunes/v1/categories
+#+end_src
+
+
+| pratchett     |    3 | ok | pratchett     |    3 |
+| ascii-art     |   10 | ok | ascii-art     |   10 |
+| translate-me  |   12 | ok | translate-me  |   12 |
+| magic         |   30 | ok | magic         |   30 |
+| pets          |   52 | ok | pets          |   52 |
+| news          |   53 | ok | news          |   53 |
+| goedel        |   54 | ok | goedel        |   54 |
+| paradoxum     |   72 | ok | paradoxum     |   72 |
+| medicine      |   74 | ok | medicine      |   74 |
+| tao           |   82 | ok | tao           |   82 |
+| debian        |   85 | ok | debian        |   85 |
+| riddles       |  127 | ok | riddles       |  127 |
+| sports        |  147 | ok | sports        |  147 |
+| love          |  150 | ok | love          |  150 |
+| kids          |  151 | ok | kids          |  151 |
+| ethnic        |  162 | ok | ethnic        |  162 |
+| food          |  197 | ok | food          |  197 |
+| humorists     |  198 | ok | humorists     |  198 |
+| education     |  205 | ok | education     |  205 |
+| law           |  206 | ok | law           |  206 |
+| drugs         |  207 | ok | drugs         |  207 |
+| startrek      |  227 | ok | startrek      |  227 |
+| shlomif-fav   |  247 | ok | shlomif-fav   |  247 |
+| literature    |  263 | ok | literature    |  263 |
+| perl          |  273 | ok | perl          |  273 |
+| disclaimer    |  284 | ok | disclaimer    |  284 |
+| linux         |  402 | ok | linux         |  402 |
+| fortunes      |  431 | ok | fortunes      |  431 |
+| wisdom        |  432 | ok | wisdom        |  432 |
+| art           |  474 | ok | art           |  474 |
+| platitudes    |  498 | ok | platitudes    |  498 |
+| knghtbrd      |  540 | ok | knghtbrd      |  540 |
+| zippy         |  548 | ok | zippy         |  548 |
+| men-women     |  583 | ok | men-women     |  583 |
+| science       |  626 | ok | science       |  626 |
+| work          |  630 | ok | work          |  630 |
+| miscellaneous |  651 | ok | miscellaneous |  651 |
+| politics      |  704 | ok | politics      |  704 |
+| songs-poems   |  720 | ok | songs-poems   |  720 |
+| computers     | 1065 | ok | computers     | 1065 |
+| cookie        | 1147 | ok | cookie        | 1147 |
+| definitions   | 1203 | ok | definitions   | 1203 |
+| people        | 1251 | ok | people        | 1251 |
+#+TBLFM: $3=if(($1==$4)&&($2==$5),ok,Abweichung)
+
+** compose-Datei
+
+Jetzt das Ganze als compose-Datei.
+
+#+begin_src docker-compose :tangle build/docker-compose.yml :noweb yes
+services:
+
+  mongo:
+    image: mongo:latest
+    restart: always
+    networks:
+      - fortune
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: root
+      MONGO_INITDB_ROOT_PASSWORD: example
+    volumes:
+      - "datastore:/data/db"
+
+  rabbitmq:
+    image: rabbitmq
+    restart: always
+    networks:
+      - fortune
+
+  fortune:
+    image: berndpaffenholz/fortunef:0.1
+    restart: always
+    networks:
+      - fortune
+      - behind-proxy
+    labels:
+      - "traefik.enable=true"
+      - "traefik.http.routers.fortune.entrypoints=web-secure"
+      - "traefik.http.routers.fortune.rule=Host(`api.p4ffi.de`)"
+      - "traefik.http.routers.fortune.tls=true"
+      - "traefik.http.routers.fortune.tls.certresolver=letsencrypt"
+      - "traefik.http.routers.fortune.tls.domains[0].main=api.p4ffi.de"
+      - "traefik.http.services.fortune.loadbalancer.server.port=80"
+    depends_on:
+      - mongo
+      - rabbitmq
+    
+volumes:
+  datastore:
+
+networks:
+  fortune:
+  behind-proxy:
+    external: true
+#+end_src
+
+Der Webserver =fortune= muss im gleichen Netzwerk (=behind-proxy=)
+liegen wie der Loadbalancer. Dies wird in [[file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][der Konfiguration für
+=p4ffi.de=]] festgelegt.
+
+#+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
+services:
+  fortune:
+    ports:
+      - "80:80"
+#+end_src
+
+# Das tangeln nicht vergessen!
+#+begin_src bash :dir build :results output :var not_needed=(org-babel-tangle)
+docker build --quiet --force-rm --tag berndpaffenholz/fortunef:0.1 .
+docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml up -d
+#+end_src
+
+#+RESULTS:
+: sha256:d75263a66481a196520a409fe18199598e452ebab5aabc7593192f5c77679a04
+
+#+begin_src bash :dir build
+docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml down
+#+end_src
+
+#+RESULTS:
+
+* Test
+
+Die Testhilfen werden in eigene Dockerfiles auslagert. Diese können
+beim Aufruf mittels =-f= kombiniert werden.
+
+#+begin_src docker-compose :tangle build/docker-compose-test-mongo.yml 
+services:
+  mongo-express:
+    image: mongo-express
+    restart: "no"
+    depends_on:
+      - mongo
+    networks:
+      - fortune
+    ports:
+      - "8081:8081"
+    environment:
+      ME_CONFIG_MONGODB_ADMINUSERNAME: root
+      ME_CONFIG_MONGODB_ADMINPASSWORD: example
+      ME_CONFIG_MONGODB_URL: "mongodb://root:example@mongo:27017/"
+#+end_src
+
+* Celery
+:PROPERTIES:
+:header-args:python: :tangle build/app/tasks.py
+:END:
+
+Die python-Code-Stücke für die Steuerung von Celery werden in die
+Datei call_tangle_file_name("python") geschrieben.
+
+#+begin_src python :results output
+#import logging
+from celery import Celery
+from celery.schedules import crontab
+from app.cites import update_from_files
+from celery.utils.log import get_task_logger
+
+#logger = logging.getLogger("fortunes")
+
+app = Celery('tasks', backend='rpc://', broker='pyamqp://guest@rabbitmq//')
+app.conf.timezone = 'Europe/Berlin'
+logger = get_task_logger("fortunes")
+
+@app.on_after_configure.connect
+def setup_periodic_tasks(sender, **kwargs):
+    # Executes every morning at 0500
+    sender.add_periodic_task(
+        crontab(minute=0,hour=5),
+        run_update_db.s(),
+    )
+
+@app.task
+def run_update_db():
+    logger.info("Run the task 'run_update_db'.")
+    print("Mid in run_update_db")
+    update_from_files()
+    return "success"
+#+end_src
+
+Zum Start des Mechanismus von Celery muss der Server gestartet werden:
+
+#+begin_src bash :tangle no :noweb-ref pre-start
+celery multi start -A app.tasks worker -B -s /var/log/celery/celerybeat-schedule --loglevel=INFO
+#+end_src
+
+Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt.
+
+* ToDo                                                             :noexport:
+
+** TODO Wegfall einer Kategorie
+
+Wenn eine Kategorie wegfällt, oder nicht mehr gewünscht wird, dann
+wird das durch den Updatemechanismus nicht berücksichtigt. Die Daten
+dieser Kategorie würden in der Datenbank stehen bleiben. Hier würde
+nur ein Löschen der Mongo-DB durch Neustart des Containers mit
+gelöschten Volumes helfen.
+
+** TODO Umstellen auf FastAPI
+
+Das Tool [[https://fastapi.tiangolo.com][FastAPI]] soll wesentlich schlanker und schneller sein. Für
+einen [[https://realpython.com/api-integration-in-python/#fastapi][Vergleich]] bitte in [[https://www.google.com/search?client=safari&rls=en&sxsrf=AB5stBgNMyVbLlXT_9e3TeNfDz5OUxaHbQ:1688998490230&q=fastapi+python+compare&spell=1&sa=X&ved=2ahUKEwiI6KTYqYSAAxVmh_0HHTHqB5EQkeECKAB6BAgLEAE][google suchen]]. Und vom gleichen Autor gibt es
+auch eine [[https://fastapi.tiangolo.com/deployment/docker/][Anleitung für ein Docker-Image]].
+
+* Deploy to target
+
+#+begin_src bash
+docker image push -q berndpaffenholz/fortunef:0.1
+scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
+ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortunef:0.1 && docker compose up --quiet-pull -d"
+#+end_src
+
+#+RESULTS:
+| docker.io/berndpaffenholz/fortunef:0.1 |
+| docker.io/berndpaffenholz/fortunef:0.1 |
+
+* Hilfsmittel                                                      :noexport:
+
+#+NAME: tangle_file_name
+#+BEGIN_SRC emacs-lisp :var lang="x"
+(let ((prop (car (org-property-values (concat "header-args:" lang)))))
+  (string-match ":tangle \\(.*\\)" prop)
+  (match-string 1 prop))
+#+END_SRC
+
+#+RESULTS: tf
+: app/tasks.py
+
+#+begin_src bash
+pip install fastapi
+pip install "uvicorn[standard]"
+#+end_src
+
+#+RESULTS:
+| Defaulting  | to      | user       | installation                                         | because | normal                                                   | site-packages | is                                                             | not      | writeable |
+| Requirement | already | satisfied: | fastapi                                              | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (0.100.0)     |                                                                |          |           |
+| Requirement | already | satisfied: | pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,<3.0.0,>=1.7.4 | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | fastapi)                                                       | (2.0.2)  |           |
+| Requirement | already | satisfied: | starlette<0.28.0,>=0.27.0                            | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | fastapi)                                                       | (0.27.0) |           |
+| Requirement | already | satisfied: | typing-extensions>=4.5.0                             | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | fastapi)                                                       | (4.7.1)  |           |
+| Requirement | already | satisfied: | annotated-types>=0.4.0                               | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,<3.0.0,>=1.7.4->fastapi) | (0.5.0)  |           |
+| Requirement | already | satisfied: | pydantic-core==2.1.2                                 | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | pydantic!=1.8,!=1.8.1,!=2.0.0,!=2.0.1,<3.0.0,>=1.7.4->fastapi) | (2.1.2)  |           |
+| Requirement | already | satisfied: | anyio<5,>=3.4.0                                      | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | starlette<0.28.0,>=0.27.0->fastapi)                            | (3.7.1)  |           |
+| Requirement | already | satisfied: | idna>=2.8                                            | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | anyio<5,>=3.4.0->starlette<0.28.0,>=0.27.0->fastapi)           | (3.4)    |           |
+| Requirement | already | satisfied: | sniffio>=1.1                                         | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | anyio<5,>=3.4.0->starlette<0.28.0,>=0.27.0->fastapi)           | (1.3.0)  |           |
+| Requirement | already | satisfied: | exceptiongroup                                       | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | anyio<5,>=3.4.0->starlette<0.28.0,>=0.27.0->fastapi)           | (1.1.2)  |           |
+| Defaulting  | to      | user       | installation                                         | because | normal                                                   | site-packages | is                                                             | not      | writeable |
+| Requirement | already | satisfied: | uvicorn[standard]                                    | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (0.22.0)      |                                                                |          |           |
+| Requirement | already | satisfied: | click>=7.0                                           | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (8.1.3)  |           |
+| Requirement | already | satisfied: | h11>=0.8                                             | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (0.14.0) |           |
+| Requirement | already | satisfied: | httptools>=0.5.0                                     | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (0.6.0)  |           |
+| Requirement | already | satisfied: | python-dotenv>=0.13                                  | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (1.0.0)  |           |
+| Requirement | already | satisfied: | pyyaml>=5.1                                          | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (6.0)    |           |
+| Requirement | already | satisfied: | uvloop!=0.15.0,!=0.15.1,>=0.14.0                     | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (0.17.0) |           |
+| Requirement | already | satisfied: | watchfiles>=0.13                                     | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (0.19.0) |           |
+| Requirement | already | satisfied: | websockets>=10.4                                     | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | uvicorn[standard])                                             | (11.0.3) |           |
+| Requirement | already | satisfied: | anyio>=3.0.0                                         | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | watchfiles>=0.13->uvicorn[standard])                           | (3.7.1)  |           |
+| Requirement | already | satisfied: | idna>=2.8                                            | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | anyio>=3.0.0->watchfiles>=0.13->uvicorn[standard])             | (3.4)    |           |
+| Requirement | already | satisfied: | sniffio>=1.1                                         | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | anyio>=3.0.0->watchfiles>=0.13->uvicorn[standard])             | (1.3.0)  |           |
+| Requirement | already | satisfied: | exceptiongroup                                       | in      | /Users/Bernd/Library/Python/3.9/lib/python/site-packages | (from         | anyio>=3.0.0->watchfiles>=0.13->uvicorn[standard])             | (1.1.2)  |           |
+
+* Probieren                                                        :noexport: 
+
+#+begin_src python :tangle app/test.py
+print( __name__)
+#+end_src
+
+#+begin_src bash
+python3 app/test.py
+#+end_src
+
+#+RESULTS:
+: __main__
+
+* Local Variables                                                  :noexport:
+# Local Variables:
+# org-confirm-babel-evaluate: nil
+# End:

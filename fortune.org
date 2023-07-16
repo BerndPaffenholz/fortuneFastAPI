@@ -403,7 +403,7 @@ Jetzt das Ganze als compose-Datei.
 services:
 
   mongo:
-    image: mongo
+    image: mongo:latest
     restart: always
     networks:
       - fortune
@@ -447,7 +447,7 @@ networks:
 #+end_src
 
 Der Webserver =fortune= muss im gleichen Netzwerk (=behind-proxy=)
-liegen wie der Loadbalancer. Dies wird in [[file:~/Sites/p4ffi.de/p4ffi.de.org::*=docker-compose= für Reverse-Proxy mit statischem Web-Server][der Konfiguration für
+liegen wie der Loadbalancer. Dies wird in [[file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][der Konfiguration für
 =p4ffi.de=]] festgelegt.
 
 #+begin_src docker-compose :tangle docker-compose-test.yml :noweb yes
@@ -464,7 +464,7 @@ docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compos
 #+end_src
 
 #+RESULTS:
-: sha256:df997805a364a914c2457eb3126ac5ab981505313378ce83ee0a0b7ab378828a
+: sha256:e670c00c6825ebbc67a6fbdb8a20946b32f2a0544231625919749aa1ff359ffa
 
 #+begin_src bash
 docker compose down
@@ -482,6 +482,8 @@ services:
   mongo-express:
     image: mongo-express
     restart: "no"
+    depends_on:
+      - mongo
     networks:
       - fortune
     ports:
@@ -493,8 +495,14 @@ services:
 #+end_src
 
 * Celery
+:PROPERTIES:
+:header-args:python: :tangle app/tasks.py
+:END:
 
-#+begin_src python :tangle app/tasks.py :results output
+Die python-Code-Stücke für die Steuerung von Celery werden in die
+Datei call_tangle_file_name("python") geschrieben.
+
+#+begin_src python :results output
 import logging
 from celery import Celery
 from celery.schedules import crontab
@@ -522,13 +530,33 @@ def run_update_db():
     return "success"
 #+end_src
 
-#+RESULTS:
+Zum Start des Mechanismus von Celery muss der Server gestartet werden:
 
-#+begin_src bash :tangle app/prestart.sh
+#+begin_src bash :tangle (or celery_bash)
 celery multi start -A tasks worker -B -s /var/log/celery/celerybeat-schedule --loglevel=INFO
 #+end_src
 
-* Test                                                             :noexport:
+#+BEGIN_SRC emacs-lisp :results silent :exports none
+(setq celery_bash "app/prestart.sh")
+#+END_SRC
+
+Dieses Kommando kommt in src_elisp{celery_bash}.
+
+* ToDo                                                             :noexport:
+
+** TODO Wegfall einer Kategorie
+
+Wenn eine Kategorie wegfällt, oder nicht mehr gewünscht wird, dann
+wird das durch den Updatemechanismus nicht berücksichtigt. Die Daten
+dieser Kategorie würden in der Datenbank stehen bleiben. Hier würde
+nur ein Löschen der Mongo-DB durch Neustart des Containers mit
+gelöschten Volumes helfen.
+
+** TODO Umstellen auf FastAPI
+
+Das Tool [[https://fastapi.tiangolo.com][FastAPI]] soll wesentlich schlanker und schneller sein. Für
+einen [[https://realpython.com/api-integration-in-python/#fastapi][Vergleich]] bitte in [[https://www.google.com/search?client=safari&rls=en&sxsrf=AB5stBgNMyVbLlXT_9e3TeNfDz5OUxaHbQ:1688998490230&q=fastapi+python+compare&spell=1&sa=X&ved=2ahUKEwiI6KTYqYSAAxVmh_0HHTHqB5EQkeECKAB6BAgLEAE][google suchen]]. Und vom gleichen Autor gibt es
+auch eine [[https://fastapi.tiangolo.com/deployment/docker/][Anleitung für ein Docker-Image]].
 
 * Deploy to target
 
@@ -541,6 +569,18 @@ ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q bernd
 #+RESULTS:
 | docker.io/berndpaffenholz/fortuned:0.1 |
 | docker.io/berndpaffenholz/fortuned:0.1 |
+
+* Hilfsmittel                                                      :noexport:
+
+#+NAME: tangle_file_name
+#+BEGIN_SRC emacs-lisp :var lang="x"
+(let ((prop (car (org-property-values (concat "header-args:" lang)))))
+  (string-match ":tangle \\(.*\\)" prop)
+  (match-string 1 prop))
+#+END_SRC
+
+#+RESULTS: tf
+: app/tasks.py
 
 * Local Variables                                                  :noexport:
 # Local Variables:
