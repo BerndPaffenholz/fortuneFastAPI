@@ -87,7 +87,7 @@ def get_one_random_cookie():
         raise HTTPException(status_code=500, detail="Problem with the database.")
 
 @app.post('/fortunes/v1', tags=["fortunes"], status_code=HTTPStatus.ACCEPTED)
-def update_fortunes_database() -> str:
+def update_fortunes_database() -> dict:
     from app.tasks import run_update_db
     try:
         log.info("post requested.")
@@ -308,10 +308,12 @@ def list_files():
 
 @app.task
 def map_in_group (filelist):
+    logger.info("map_in_group %s", filelist)
     return group([load_one_file(f) for f in filelist])
     
 @app.task(ignore_result=False)
 def load_one_file(filename):
+    logger.info("load_one_file %s", filename)
     return cites.read_category_file_add_to_collection(Path(filename))
 
 @app.task(ignore_result=False)
@@ -378,13 +380,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortunef:0.1 .
+docker build --quiet --force-rm --tag berndpaffenholz/fortunef:0.2 .
 #+end_src
 #+RESULTS:
 : sha256:dbfce115358aec14c0c0698fcde57375a7954060e3566468428c3c2d826c4c3c
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortunef:0.1
+docker run --detach --publish 8000:80 berndpaffenholz/fortunef:0.2
 #+end_src
 
 #+RESULTS:
