@@ -357,18 +357,19 @@ celery
 Das =dockerfile= für Python und die Anwendung.
 
 #+begin_src dockerfile :tangle "build/dockerfile"
-FROM python:3.11
+FROM python:3.11-alpine
+RUN apk add --no-cache git
 WORKDIR /code
 COPY ./requirements.txt /code/requirements.txt
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 COPY ./app /code/app
 RUN cd /;git clone https://github.com/BerndPaffenholz/fortune-mod.git
-CMD ["bash", "-c", "app/start.sh"]
+CMD ["sh", "-c", "app/start.sh"]
 #+end_src
 
 Die Startdatei.
 
-#+begin_src bash :shebang "#!/bin/bash" :tangle "build/app/start.sh" :noweb tangle
+#+begin_src bash :shebang "#!/bin/sh" :tangle "build/app/start.sh" :noweb tangle
 <<pre-start>>
 uvicorn app.main:app --host 0.0.0.0 --port 80
 #+end_src
@@ -422,7 +423,7 @@ services:
       - fortune
 
   fortune:
-    image: berndpaffenholz/fortunef:0.1
+    image: berndpaffenholz/fortunef:0.2
     restart: always
     build: .
     networks:
