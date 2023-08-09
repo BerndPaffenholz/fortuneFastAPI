@@ -1,5 +1,5 @@
 #+TITLE: REST-Service für fortune with FastAPI
-
+#+PROPERTY: header-args:python :comments link
 * Motivation
 
 Nachdem es mir nicht gelungen ist, einen verläßlichen Service für das
@@ -20,15 +20,18 @@ Service liest aus der Datenbank.
 
 ** Anwendung und REST-Schnitstelle
 
-#+begin_src python :tangle "build/app/main.py"
-from typing import Union
+#+begin_src python :tangle "build/app/main.py" :noweb tangle
+"""For Documentation see =fortuneFastApi.org="""
+from http import HTTPStatus
+import logging
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, TypeAdapter
 
-from http import HTTPStatus
+from app.tasks import run_update_db
+from app import cites
 
-description="""Every one goes with a quote.
+DESCRIPTION="""Every one goes with a quote.
 See <a href="https://linux.die.net/man/6/fortune">fortune</a>.
 Quotes are from <a href="https://github.com/BerndPaffenholz/fortune-mod.git">here</a>
 which is a clone from <a href="https://github.com/shlomif/fortune-mod">fortune-mod</a>.
@@ -36,9 +39,9 @@ which is a clone from <a href="https://github.com/shlomif/fortune-mod">fortune-m
 
 app = FastAPI(
     title="Fortune - Cookies",
-    description=description,
+    description=DESCRIPTION,
     summary="Cool sayings for everyone.",
-    version="0.1.0",
+    version="1.0",
     #terms_of_service="http://paffi.org/impressum/",
     contact={
         "name": "Bernd Paffenholz",
@@ -51,19 +54,15 @@ app = FastAPI(
     },
 )
 
-import logging
 log = logging.getLogger("fortunes")
-log.setLevel(logging.INFO)
-format = logging.Formatter(fmt='%(levelname)s: %(message)s')
+log.setLevel(logging.<<loglevel>>)
+log_format = logging.Formatter(fmt='%(levelname)s: %(message)s')
 handler = logging.StreamHandler()
-handler.setFormatter(format)
+handler.setFormatter(log_format)
 log.addHandler(handler)
 
-import app.cites as cites
 cites.init_app(app)
 
-
-from app.tasks import run_update_db
 run_update_db_id = run_update_db.delay()
 log.info("Task %s started.",run_update_db_id)
 
@@ -77,43 +76,42 @@ class StatsEntry(BaseModel):
 
 Stats = TypeAdapter(StatsEntry)
 
-
 @app.get('/fortunes/v1', response_model=Cookie, tags=["fortunes"])
 def get_one_random_cookie():
     try:
         found = cites.find_one()
         return found
-    except LookupError as l:
-        raise HTTPException(status_code=500, detail="Problem with the database.")
+    except LookupError as not_found:
+        raise HTTPException(status_code=404, detail=not_found.args[0])
 
 @app.post('/fortunes/v1', tags=["fortunes"], status_code=HTTPStatus.ACCEPTED)
 def update_fortunes_database() -> dict:
-    from app.tasks import run_update_db
     try:
-        log.info("post requested.")
+        log.debug("post requested.")
         result = run_update_db.delay()
         return {"update-task-id": result.id}
-    except Exception as l:
+    except Exception:
         raise HTTPException(status_code=500, detail="Problem with the workflow.")
 
-        
 @app.get('/fortunes/v1/categories', response_model=dict[str,int], tags=["categories"])
 def get_category_stats():
     try:
         return cites.list_categories()
-    except Exception as l:
+    except Exception:
         raise HTTPException(status_code=500, detail="Problem with the database.")
 
-        
 @app.get('/fortunes/v1/categories/{category}', response_model=Cookie, tags=["categories"])
 def get_one_random_fortune_from_category(category: str):
     try:
-        return cites.find_one(category)
-    except KeyError as k:
-        raise HTTPException(status_code=404, detail=k.args[0])
-    except LookupError as l:
-        raise HTTPException(status_code=500, detail=l.args[0])
+        cookie = cites.find_one(category)
+    except LookupError as problem:
+        raise HTTPException(status_code=500, detail=f"Problem with category '{category}'.")
+    if cookie is None:
+        raise HTTPException(status_code=404, detail=f"Category '{category}' not found.")
+    return cookie
 #+end_src
+
+#+RESULTS:
 
 #+begin_src bash :exports none
 python3 -m uvicorn main:app --reload
@@ -121,95 +119,67 @@ python3 -m uvicorn main:app --reload
 
 ** Schnittstelle Datenbank
 
-#+begin_src python :tangle "build/app/cites.py"
+#+begin_src python :tangle "build/app/cites.py" :noweb tangle
 import logging
+<<cites-import-standard>>
+
+from pymongo import MongoClient
+<<cites-import-specific>>
+
 log = logging.getLogger("fortunes")
 
-from pymongo import MongoClient
 mongodb = MongoClient("mongodb://mongo:27017/",username="root",password="example")
-databasename = "fortune"
+DATABASENAME = "fortune"
+citesdb = mongodb[DATABASENAME].sayings
+confdb = mongodb[DATABASENAME].config
 
-def get_citesdb():
-    global mongodb, databasename
-    try:
-        return mongodb[databasename].sayings
-    except Exception as e:
-        print(e)
-        raise e
-
-def get_confdb():
-    global mongodb, databasename
-    try:
-        return mongodb[databasename].config
-    except Exception as e:
-        print(e)
-        raise e
-
-def close_db(e=None):
-    global mongodb, databasename
+def close_db(_e=None):
     if mongodb is not None:
-        pass
+        mongodb.close()
 
 def find_one (cat=None):
-    citesdb = get_citesdb()
-    if cat == None:
-        query = []
-        keyerror_msg = "Nothing found."
-        error_msg = "Problem with database."
-    else:
-        query = [ { "$match": { "category": cat } } ]
-        keyerror_msg = f"Category '{cat}' not found."
-        error_msg = f"Problem with category '{cat}'."
-    query += [ { "$sample": { "size": 1 } }]
+    query = ([] if cat is None else [{"$match": {"category": cat} }]) + [{"$sample": {"size": 1}}]
     try:
-        sample = citesdb.aggregate(query).next()
-        return { k:sample[k] for k in ("text", "category") }
-    except StopIteration :
-        raise KeyError(keyerror_msg)
-    except Exception as e:
-        log.error(e)
-        raise LookupError(error_msg)
+        cursor = citesdb.aggregate(query)
+        if cursor.alive:
+            sample = cursor.next()
+            return { k:sample[k] for k in ("text", "category") }
+        return None
+    except Exception as exc:
+        log.error(exc)
+        raise LookupError("Problem with sample.")
 
-def list_categories ():
-    citesdb = get_citesdb()
+def list_categories () -> dict:
     counts = citesdb.aggregate([{ "$group": { "_id": "$category", "count": { "$count": {} } } }])
-    dict = {}
-    for c in counts:
-        dict[c["_id"]] = c["count"]
-    return dict
+    stats = {c["_id"]: c["count"] for c in counts}
+    return stats
 
-def init_app(app):
-    # app.teardown_appcontext(close_db)
-    global mongodb, databasename
-    if not (databasename in  mongodb.list_database_names()):
-        log.info("no database")
-        mongodb[databasename].config.insert_one({"name": 'git-commit-id', "value": None})
+def init_app(_app):
+    if not DATABASENAME in  mongodb.list_database_names():
+        log.warning("no database")
+        mongodb[DATABASENAME].config.insert_one({"name": 'git-commit-id', "value": None})
         return False
-    else:
-        return True
-
+    return True
 #+end_src
 
 #+RESULTS:
 
-#+begin_src python
+#+begin_src python :dir "/docker:build-fortune-1:/"
 from pymongo import MongoClient
 client = MongoClient("mongodb://mongo:27017/",username="root",password="example");
-return client.fortune.list_collection_names()
+return client.fortune.config.find_one({"name":"git-commit-id"})
 #+end_src
 
 #+RESULTS:
-| config | sayings |
+| _id | : | ObjectId | (64c024e38b8067ce81b63c62) | name | : | git-commit-id | value | : | 8a80f31e5aadce61265ac37edd8ede21a6538a4a\n |
 
 ** Refresh der Datenbank
 
 #+begin_src python :results verbatim :tangle "build/app/cites.py"
 def add_saying_with_category (saying, category):
-    citesdb = get_citesdb()
     citesdb.insert_one({"category": category, "text": saying })
 
 def remove_category (category):
-    citesdb = get_citesdb()
     citesdb.delete_many({"category": category })
 
 def read_category_file_add_to_collection (file):
@@ -219,19 +189,18 @@ def read_category_file_add_to_collection (file):
 
     remove_category(category)
 
-    with file.open("r") as fd:
-        for l in fd:
-            if l == "%\n":
+    with file.open("r") as contents:
+        for line in contents:
+            if line == "%\n":
                 if saying != "":
                     count += 1
                     add_saying_with_category (saying, category)
                     saying = ""
             else:
-                saying += l
+                saying += line
 
-    return {f"{category}": count}
-
-from pathlib import Path
+    log.debug({category: count})
+    return {category: count}
 
 def list_files_for_cites ():
     source = Path('/fortune-mod/fortune-mod/datfiles')
@@ -239,26 +208,23 @@ def list_files_for_cites ():
     return lof
 #+end_src
 
+#+begin_src python :noweb-ref cites-import-standard
+from pathlib import Path
+from subprocess import check_output, call
+#+end_src
 
 #+begin_src python :tangle "build/app/cites.py"
-from subprocess import check_output, call
-
 def get_current_git_commit_id ():
     call(['git', 'pull', '--ff-only'],cwd="/fortune-mod")
     return check_output(['git', 'log', '-1', '--format=%H'], shell=False, text=True,cwd="/fortune-mod")
 
 def get_db_git_commit_id ():
-    config = get_confdb()
-    commit_value = config.find_one({"name":"git-commit-id"})
-    if commit_value == None:
-        return ""
-    else:
-        return commit_value["value"] or ""
+    commit_value = confdb.find_one({"name":"git-commit-id"})
+    return "" if commit_value is None else commit_value["value"] or ""
 
 def update_git_commit_id ():
-    config = get_confdb()
     git_id = get_current_git_commit_id()
-    config.update_one({"name":"git-commit-id"}, {"$set":{"value":git_id}}, upsert=True)
+    confdb.update_one({"name":"git-commit-id"}, {"$set":{"value":git_id}}, upsert=True)
 #+end_src
 
 ** Celery
@@ -270,15 +236,14 @@ Die python-Code-Stücke für die Steuerung von Celery werden in die
 Datei call_tangle_file_name("python") geschrieben.
 
 #+begin_src python :results output
-from celery import Celery, chain, group
-from celery.schedules import crontab
-import app.cites as cites
-from celery.utils.log import get_task_logger
-
+import operator
+from functools import reduce
 from pathlib import Path
 
-#import logging
-#logger = logging.getLogger("fortunes")
+from celery import Celery, chain, group
+from celery.schedules import crontab
+from celery.utils.log import get_task_logger
+import app.cites as cites
 
 app = Celery('tasks', backend='rpc://guest@rabbitmq', broker='pyamqp://guest@rabbitmq//')
 app.conf.timezone = 'Europe/Berlin'
@@ -294,33 +259,35 @@ def setup_periodic_tasks(sender, **kwargs):
 
 @app.task
 def run_update_db():
-    logger.info("Run the task 'run_update_db'.")
+    logger.debug("Run the task 'run_update_db'.")
     if cites.get_current_git_commit_id() != cites.get_db_git_commit_id():
-        print("Mid in run_update_db")
+        logger.debug("Mid in run_update_db")
         res = chain(list_files.s(), map_in_group.s(), compare_categories.s(), update_gitid.si())
         return res()
     return False
 
 @app.task
 def list_files():
-    logger.info("list files")
+    logger.debug("list files")
     return cites.list_files_for_cites()
 
 @app.task
 def map_in_group (filelist):
-    logger.info("map_in_group %s", filelist)
-    return group([load_one_file(f) for f in filelist])
-    
+    logger.debug("map_in_group %s", filelist)
+    load_files_group = group([load_one_file.s(f) for f in filelist])()
+    loaded_files = load_files_group.get(disable_sync_subtasks=False)
+    logger.debug("returns %s", loaded_files)
+    return loaded_files
+
 @app.task(ignore_result=False)
 def load_one_file(filename):
-    logger.info("load_one_file %s", filename)
+    logger.debug("load_one_file %s", filename)
     return cites.read_category_file_add_to_collection(Path(filename))
 
 @app.task(ignore_result=False)
 def compare_categories (results):
-    from functools import reduce
-    import operator
-    new_loaded_categories = reduce(operator.or_,results["kwargs"]["tasks"])
+    logger.debug("compare_categories %s", results)
+    new_loaded_categories = reduce(operator.or_,results)
     current_categories = cites.list_categories()
     to_be_dropped = filter(lambda cat: cat not in new_loaded_categories, current_categories.keys())
     for cat in to_be_dropped:
@@ -330,7 +297,7 @@ def compare_categories (results):
 
 @app.task
 def update_gitid ():
-    logger.info("Update git id")
+    logger.debug("Update git id")
     cites.update_git_commit_id()
     return True
 
@@ -338,8 +305,8 @@ def update_gitid ():
 
 Zum Start des Mechanismus von Celery muss der Server gestartet werden:
 
-#+begin_src bash :tangle no :noweb-ref pre-start
-celery multi start -A app.tasks worker -B -s /var/log/celery/celerybeat-schedule --loglevel=INFO
+#+begin_src bash :tangle no :noweb-ref pre-start :noweb no-export
+celery multi start -A app.tasks worker -B -s /var/log/celery/celerybeat-schedule --loglevel=<<loglevel>>
 #+end_src
 
 Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt.
@@ -366,7 +333,7 @@ COPY ./requirements.txt /code/requirements.txt
 RUN pip install --no-cache-dir --upgrade -r /code/requirements.txt
 COPY ./app /code/app
 RUN cd /;git clone https://github.com/BerndPaffenholz/fortune-mod.git
-CMD ["sh", "-c", "app/start.sh"]
+CMD ["app/start.sh"]
 #+end_src
 
 Die Startdatei.
@@ -380,13 +347,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortunef:0.2 .
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.0 .
 #+end_src
 #+RESULTS:
 : sha256:dbfce115358aec14c0c0698fcde57375a7954060e3566468428c3c2d826c4c3c
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortunef:0.2
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.0
 #+end_src
 
 #+RESULTS:
@@ -397,8 +364,11 @@ docker ps
 #+end_src
 
 #+RESULTS:
-: CONTAINER ID   IMAGE          COMMAND                  CREATED         STATUS         PORTS                  NAMES
-: 4799aab3c845   99424b76fdeb   "uvicorn app.main:ap…"   9 minutes ago   Up 9 minutes   0.0.0.0:8000->80/tcp   relaxed_swartz
+: CONTAINER ID   IMAGE                         COMMAND                  CREATED         STATUS                   PORTS                                                 NAMES
+: e270696dfedc   berndpaffenholz/fortune:1.0   "app/start.sh"           2 minutes ago   Up 2 minutes             0.0.0.0:80->80/tcp                                    build-fortune-1
+: a96a225c3f4d   mongo-express                 "tini -- /docker-ent…"   2 minutes ago   Up 2 minutes             0.0.0.0:8081->8081/tcp                                build-mongo-express-1
+: 07031a2195b8   mongo:latest                  "docker-entrypoint.s…"   2 minutes ago   Up 2 minutes (healthy)   27017/tcp                                             build-mongo-1
+: 618a59fc4d46   rabbitmq                      "docker-entrypoint.s…"   2 minutes ago   Up 2 minutes (healthy)   4369/tcp, 5671-5672/tcp, 15691-15692/tcp, 25672/tcp   build-rabbitmq-1
 
 ** compose-Datei
 
@@ -412,6 +382,11 @@ services:
     restart: always
     networks:
       - fortune
+    healthcheck:
+      test: ["CMD","mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
     environment:
       MONGO_INITDB_ROOT_USERNAME: root
       MONGO_INITDB_ROOT_PASSWORD: example
@@ -421,11 +396,16 @@ services:
   rabbitmq:
     image: rabbitmq
     restart: always
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
     networks:
       - fortune
 
   fortune:
-    image: berndpaffenholz/fortunef:0.2
+    image: berndpaffenholz/fortune:1.0
     restart: always
     build: .
     networks:
@@ -444,8 +424,10 @@ services:
       - "traefik.http.routers.fortunep.middlewares=auth-dashboard"
       - "traefik.http.routers.fortunep.tls=true"
     depends_on:
-      - mongo
-      - rabbitmq
+      mongo:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
     
 volumes:
   datastore:
@@ -466,6 +448,8 @@ liegen wie der Loadbalancer. Dies wird in [[file:~/Sites/p4ffi.de/p4ffi.de.org::
 Die Testhilfen werden in eigene Dockerfiles auslagert. Diese können
 beim Aufruf mittels =-f= kombiniert werden.
 
+Damit auf dem lokalen Host per Browser ~localhost:/docs~ aufgerufen
+werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
@@ -473,27 +457,15 @@ services:
       - "80:80"
 #+end_src
 
-# Das tangeln erfolgt hier automatisch
-#+begin_src bash :dir build :results none :prologue (ignore (org-babel-tangle))
-docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml \
-       up --detach --build --quiet-pull
-#+end_src
-
-#+RESULTS:
-
-#+begin_src bash :dir build
-docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml down
-#+end_src
-
-#+RESULTS:
-
+Hier wird =Mongo Express= bereitgestellt:
 #+begin_src docker-compose :tangle build/docker-compose-test-mongo.yml 
 services:
   mongo-express:
     image: mongo-express
     restart: "no"
     depends_on:
-      - mongo
+      mongo:
+        condition: service_healthy
     networks:
       - fortune
     ports:
@@ -502,6 +474,28 @@ services:
       ME_CONFIG_MONGODB_ADMINUSERNAME: root
       ME_CONFIG_MONGODB_ADMINPASSWORD: example
       ME_CONFIG_MONGODB_URL: "mongodb://root:example@mongo:27017/"
+#+end_src
+
+Der Start der Container erfolgt mit den Testhilfen und zuvor wird
+gebaut, wenn notwendig.
+# Das tangeln erfolgt hier automatisch
+#+begin_src bash :dir build :results none :prologue (ignore (org-babel-tangle))
+docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml \
+       up --detach --build --quiet-pull
+#+end_src
+
+#+RESULTS:
+
+Und damit wird gestoppt:
+#+begin_src bash :dir build
+docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml down
+#+end_src
+
+#+RESULTS:
+
+Das src_python[:eval never :exports code]{<<loglevel>>} für diese Anwendung:
+#+begin_src text :tangle no :noweb-ref loglevel
+INFO
 #+end_src
 
 ** Testaufrufe
@@ -525,12 +519,12 @@ GET http://localhost:80/fortunes/v1
 
 #+RESULTS:
 : HTTP/1.1 200 OK
-: date: Thu, 20 Jul 2023 11:36:54 GMT
+: date: Mon, 07 Aug 2023 09:32:41 GMT
 : server: uvicorn
-: content-length: 164
+: content-length: 114
 : content-type: application/json
 : 
-: {"text":"New Hampshire law forbids you to tap your feet, nod your head, or in\nany way keep time to the music in a tavern, restaurant, or cafe.\n","category":"law"}
+: {"text":"Losing your drivers' license is just God's way of saying \"BOOGA, BOOGA!\"\n","category":"miscellaneous"}
 
 #+begin_src http :pretty
 GET https://api.p4ffi.de/fortunes/v1/categories
@@ -591,13 +585,13 @@ POST http://localhost/fortunes/v1
 #+end_src
 
 #+RESULTS:
-: HTTP/1.1 500 Internal Server Error
-: date: Tue, 25 Jul 2023 19:47:05 GMT
+: HTTP/1.1 202 Accepted
+: date: Mon, 07 Aug 2023 09:55:22 GMT
 : server: uvicorn
-: content-length: 21
-: content-type: text/plain; charset=utf-8
+: content-length: 57
+: content-type: application/json
 : 
-: Internal Server Error
+: {"update-task-id":"2268406f-a981-41f0-8b10-f5c39ff7626a"}
 
 * ToDo                                                             :noexport:
 
@@ -622,9 +616,9 @@ auch eine [[https://fastapi.tiangolo.com/deployment/docker/][Anleitung für ein 
 * Deploy to target
 
 #+begin_src bash :results silent :var not_needed=(org-babel-tangle)
-docker image push -q berndpaffenholz/fortunef:0.1
+docker image push -q berndpaffenholz/fortune:1.0
 scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
-ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortunef:0.1 && docker compose up --quiet-pull -d"
+ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortune:1.0 && docker compose up --quiet-pull -d"
 #+end_src
 
 * Hilfsmittel                                                      :noexport:
@@ -641,4 +635,5 @@ ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q bernd
 * Local Variables                                                  :noexport:
 # Local Variables:
 # org-confirm-babel-evaluate: nil
+# eval: (require 'ob-http)
 # End:
