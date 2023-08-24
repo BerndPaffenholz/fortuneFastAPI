@@ -1,9 +1,23 @@
-#+TITLE: REST-Service für fortune with FastAPI
+#+TITLE: REST-Service für fortune mit FastAPI
+
+#+HUGO_BASE_DIR: /Users/Bernd/Sites/fpeh
+#+language: de
+#+HUGO_SECTION: Tools
+#+HUGO_AUTO_SET_LASTMOD: t
 #+PROPERTY: header-args:python :comments link
+#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="https://orgmode.org/worg/style/worg.css"/>
+#+hugo_front_matter_format: yaml
+#+hugo_draft: true
+#+hugo_custom_front_matter: :disable_share true
+
 * Motivation
 
 Nachdem es mir nicht gelungen ist, einen verläßlichen Service für das
 Bereitstellen von "fortunes" zu finden, habe ich einen selbst erstellt.
+
+#+begin_export hugo
+<!--more-->
+#+end_export
 
 Es gibt das Programm [[https://linux.die.net/man/6/fortune][=fortune(6)=]], aber das ist nicht immer
 installiert. Außerdem wollte ich einen Service programmieren.
@@ -18,7 +32,7 @@ oder Streichungen vornehmen kann.
 Die Textdateien mit den Zitaten werden in eine Datenbank geladen. Der
 Service liest aus der Datenbank.
 
-** Anwendung und REST-Schnitstelle
+** Anwendung und REST-Schnittstelle
 
 #+begin_src python :tangle "build/app/main.py" :noweb tangle
 """For Documentation see =fortuneFastApi.org="""
@@ -138,7 +152,8 @@ def close_db(_e=None):
         mongodb.close()
 
 def find_one (cat=None):
-    query = ([] if cat is None else [{"$match": {"category": cat} }]) + [{"$sample": {"size": 1}}]
+    query = ([] if cat is None else [{"$match": {"category": cat} }]) + \
+        [{"$sample": {"size": 1}}]
     try:
         cursor = citesdb.aggregate(query)
         if cursor.alive:
@@ -164,7 +179,7 @@ def init_app(_app):
 
 #+RESULTS:
 
-#+begin_src python :dir "/docker:build-fortune-1:/"
+#+begin_src python :dir "/docker:build-fortune-1:/" :exports none
 from pymongo import MongoClient
 client = MongoClient("mongodb://mongo:27017/",username="root",password="example");
 return client.fortune.config.find_one({"name":"git-commit-id"})
@@ -439,8 +454,9 @@ networks:
 #+end_src
 
 Der Webserver =fortune= muss im gleichen Netzwerk (=behind-proxy=)
-liegen wie der Loadbalancer. Dies wird in [[file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][der Konfiguration für
-=p4ffi.de=]] festgelegt.
+liegen wie der Loadbalancer. Dies wird in
+# file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][der Konfiguration für =p4ffi.de=]]
+festgelegt.
 
 
 * Test
@@ -635,5 +651,6 @@ ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q bernd
 * Local Variables                                                  :noexport:
 # Local Variables:
 # org-confirm-babel-evaluate: nil
+# org-use-property-inheritance: t
 # eval: (require 'ob-http)
 # End:
