@@ -1,14 +1,16 @@
-#+TITLE: REST-Service für fortune mit FastAPI
+#+TITLE: REST-Service für fortune
 
 #+HUGO_BASE_DIR: /Users/Bernd/Sites/fpeh
 #+language: de
-#+HUGO_SECTION: Tools
+# de/ ergänzt, damit das Verzeichnis für deutsch stimmt.
+#+HUGO_SECTION: de/Tools
 #+HUGO_AUTO_SET_LASTMOD: t
 #+PROPERTY: header-args:python :comments link
 #+HTML_HEAD: <link rel="stylesheet" type="text/css" href="https://orgmode.org/worg/style/worg.css"/>
-#+hugo_front_matter_format: yaml
-#+hugo_draft: true
-#+hugo_custom_front_matter: :disable_share true
+#+HTML_HEAD: <style>html {background-image: none;}</style>
+#+HUGO_FRONT_MATTER_FORMAT: yaml
+#+HUGO_DRAFT: true
+#+HUGO_CUSTOM_FRONT_MATTER: :disable_share true
 
 * Motivation
 
@@ -34,6 +36,53 @@ Service liest aus der Datenbank.
 
 ** Anwendung und REST-Schnittstelle
 
+Es gibt drei Komponenten. In ~main~ ist die Definition der
+Rest-Schnittstelle und die Initialisierung der Anwendung. Das Modul
+~tasks~ enthält die Aufgabenverarbeitung und in ~cites~ sind die
+Datenbankzugriffe implementiert.
+
+Alle drei Module liegen in der Domäne ~app~.
+
+#+HEADER: :file "./fortuneFastAPI_struct.svg"
+#+HEADER: :results output file link
+#+HEADER: :headers '("\\usepackage{tikz} \\usetikzlibrary{shapes.geometric,fit}")
+#+BEGIN_src latex :exports results
+\begin{tikzpicture}[sibling distance=16em, level distance=9em, thick, 
+  module/.style ={rectangle, draw=black,
+    text width=8em, text centered,
+    minimum height=4em}]
+  \node[module](m){main}
+    child {node[module](t) {tasks}}
+    child {node[module](c) {cites}};
+  \node[rectangle,draw,fit=(m)(t)(c),align=right,text height=8pt]{app};
+\end{tikzpicture}
+#+end_src
+
+#+RESULTS:
+[[file:./fortuneFastAPI_struct.svg]]
+
+#+BEGIN_SRC plantuml :file fortunFastAPI_packages.svg
+@startuml
+package app {
+  package tasks {}
+  package cites {}
+  package main {}
+}
+@enduml
+#+END_SRC
+
+#+RESULTS:
+[[file:fortunFastAPI_packages.svg]]
+
+#+begin_src python :tangle "build/app/main.py" :noweb tangle
+"""For Documentation see =fortuneFastApi.org="""
+from app.tasks import run_update_db
+from app import cites
+#+end_src
+
+Für die Implementierung der REST-Schnittstelle wird das Framework
+[[https://fastapi.tiangolo.com][FastAPI]] eingesetzt.
+
 #+begin_src python :tangle "build/app/main.py" :noweb tangle
 """For Documentation see =fortuneFastApi.org="""
 from http import HTTPStatus
@@ -41,10 +90,11 @@ import logging
 
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, TypeAdapter
+#+end_src
 
-from app.tasks import run_update_db
-from app import cites
-
+Die Definition und Dokumentation der REST-Schnittstelle erfolgt über
+Annotationen, Dokumentationskommentare und den Aufruf von ~FastAPI~.
+#+begin_src python :tangle "build/app/main.py" :noweb tangle
 DESCRIPTION="""Every one goes with a quote.
 See <a href="https://linux.die.net/man/6/fortune">fortune</a>.
 Quotes are from <a href="https://github.com/BerndPaffenholz/fortune-mod.git">here</a>
@@ -324,11 +374,11 @@ Zum Start des Mechanismus von Celery muss der Server gestartet werden:
 celery multi start -A app.tasks worker -B -s /var/log/celery/celerybeat-schedule --loglevel=<<loglevel>>
 #+end_src
 
-Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt.
+Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt (Block =pre-start=).
 
 * Bauen
 
-Die Abhängigkeiten für =pip=.
+Die Abhängigkeiten für =pip= in der Datei =requirements.txt=.
 
 #+begin_src text :tangle "build/requirements.txt"
 fastapi
@@ -454,10 +504,11 @@ networks:
 #+end_src
 
 Der Webserver =fortune= muss im gleichen Netzwerk (=behind-proxy=)
-liegen wie der Loadbalancer. Dies wird in
-# file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][der Konfiguration für =p4ffi.de=]]
-festgelegt.
+liegen wie der Loadbalancer. Dies wird in der Konfiguration des
+Edge Routers/Proxies festgelegt.
 
+**  Link für interne Zwecke                                        :noexport:
+[[file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][Konfiguration für =p4ffi.de=]]
 
 * Test
 
@@ -628,6 +679,22 @@ Siehe [[*Celery][Celery]] Funktion =compare_categories=.
 Das Tool [[https://fastapi.tiangolo.com][FastAPI]] soll wesentlich schlanker und schneller sein. Für
 einen [[https://realpython.com/api-integration-in-python/#fastapi][Vergleich]] bitte in [[https://www.google.com/search?client=safari&rls=en&sxsrf=AB5stBgNMyVbLlXT_9e3TeNfDz5OUxaHbQ:1688998490230&q=fastapi+python+compare&spell=1&sa=X&ved=2ahUKEwiI6KTYqYSAAxVmh_0HHTHqB5EQkeECKAB6BAgLEAE][google suchen]]. Und vom gleichen Autor gibt es
 auch eine [[https://fastapi.tiangolo.com/deployment/docker/][Anleitung für ein Docker-Image]].
+
+** DONE Das Einhorn entfernen
+
+Das Einhorn aus dem Worg-Style soll nicht angezeigt werden.
+
+*** Ideen
+
+1. Kopieren der Style-Datei und löschen des Eintrags = background-image: url(/worg/images/orgmode/org-mode-unicorn-original-logo.png);=
+2. Überschreiben a la css
+
+*** Lösung
+
+Nach dem Style ergänzen:
+#+begin_src org
+#+HTML_HEAD: <style>html {background-image: none;}</style>
+#+end_src
 
 * Deploy to target
 
