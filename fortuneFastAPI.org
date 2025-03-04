@@ -106,7 +106,7 @@ app = FastAPI(
     title="Fortune - Cookies",
     description=DESCRIPTION,
     summary="Cool sayings for everyone.",
-    version="1.6-alpha",
+    version="1.6",
     #terms_of_service="http://paffi.org/impressum/",
     contact={
         "name": "Bernd Paffenholz",
@@ -528,7 +528,7 @@ Die Basis des Codes ist [[https://leanrada.com/htmz][htmz]], ein minimales Snipp
   <body>
     <iframe hidden="" name="htmz" onload="window.htmz(this)"></iframe>
 
-    <a id="knopf" href="http://localhost/fortunes/v1?#my-element" target="htmz">Fortune</a>
+    <a id="knopf" href="https:/fortunes/v1?#my-element" target="htmz">Fortune</a>
     <div id="frame"><div id="my-element"></div></div>
   </body>
 </html>
@@ -572,17 +572,17 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6-alpha .
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6 .
 #+end_src
 #+RESULTS:
-: sha256:926d927fa34e2f53ac1a7290e1dbb1a0889ae4e7cab68e6eaae5e5fd06b622e6
+: sha256:a297ce01a680c246fa1dc1ecf00c90fb0aadab5b14a5062de09973febb647287
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6-alpha
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6
 #+end_src
 
 #+RESULTS:
-: 0dd1084370171289b8f82b2d4b9de35a1bf24fa1305ec2f23e4076aaa776348f
+: 527f6f45ee3eba10a90a1591e0127a6db09cdf319bf7b447874ccc669a0d4f17
 
 #+begin_src bash :results verbatim
 docker ps
@@ -630,7 +630,7 @@ services:
       - fortune
 
   fortune:
-    image: berndpaffenholz/fortune:1.5
+    image: berndpaffenholz/fortune:1.6
     restart: always
     build: .
     networks:
@@ -702,7 +702,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
-    image: berndpaffenholz/fortune
+    image: berndpaffenholz/fortune:1.6
     ports:
       - "80:80"
 #+end_src
@@ -1512,9 +1512,10 @@ Implementierung der [[*Webhook][Webhooks]] nach diesen [[*Webhooks Test][Experim
 * Deploy to target
 
 #+begin_src bash :results silent :var not_needed=(org-babel-tangle)
-#docker image push -q berndpaffenholz/fortune:1.6-alpha
+#docker image push -q berndpaffenholz/fortune:1.6
 scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
-ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortune:1.5 && docker compose up --force-recreate --quiet-pull --pull always -d"
+scp -p build/static bernd@p4ffi.de:/home/bernd/develop/fortune
+ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortune:1.6 && docker compose up --force-recreate --quiet-pull --pull always -d"
 #+end_src
 
 * Hilfsmittel                                                      :noexport:
