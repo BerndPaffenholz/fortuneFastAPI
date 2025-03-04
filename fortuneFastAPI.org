@@ -106,7 +106,7 @@ app = FastAPI(
     title="Fortune - Cookies",
     description=DESCRIPTION,
     summary="Cool sayings for everyone.",
-    version="1.5",
+    version="1.6-alpha",
     #terms_of_service="http://paffi.org/impressum/",
     contact={
         "name": "Bernd Paffenholz",
@@ -118,6 +118,8 @@ app = FastAPI(
         "url": "https://www.gnu.org/licenses/gpl-3.0.en.html",
     },
 )
+
+<<Mount static files>>
 
 log = logging.getLogger("fortunes")
 log.setLevel(logging.<<loglevel>>)
@@ -148,7 +150,12 @@ def get_one_random_cookie():
         return found
     except LookupError as not_found:
         raise HTTPException(status_code=404, detail=not_found.args[0])
+#+end_src
 
+<<webhook_use>>
+Die Definition des ~webhook~-Dekorators ist ein eigenes [[Webhook][Modul]].
+
+#+begin_src python :tangle "build/app/main.py" :noweb tangle
 from app import webhook
 @app.post('/fortunes/v1', tags=["fortunes"], status_code=HTTPStatus.ACCEPTED, \
           description='Webhook for github pull request. See <a href="https://docs.github.com/de/webhooks/using-webhooks/">github webhooks</a>')
@@ -160,7 +167,9 @@ def update_fortunes_database() -> dict:
         return {"update-task-id": result.id}
     except Exception:
         raise HTTPException(status_code=500, detail="Problem with the workflow.")
-
+#+end_src
+    
+#+begin_src python :tangle "build/app/main.py" :noweb tangle
 @app.get('/fortunes/v1/categories', response_model=dict[str,int], tags=["categories"])
 def get_category_stats():
     try:
@@ -186,6 +195,12 @@ python3 -m uvicorn main:app --reload
 #+end_src
 
 ** Webhook
+
+Der [[https://docs.github.com/de/webhooks][Webhook]] dient zum Aufruf von Aktionen, wenn bestimmte Ereignisse
+in einem [[https://github.com/BerndPaffenholz/fortune-mod][Repository in github]] eintreten.
+
+Da ein Webhook der Aufruf einer [[webhook_use][Rest-Schnittstelle]] ist, wird die
+Funktionalität als [[https://docs.python.org/3/reference/compound_stmts.html#function][Dekorator]] ausgeführt.
 
 #+begin_src python :tangle "build/app/webhook.py" :noweb tangle
 import logging
@@ -222,37 +237,37 @@ def webhook_PR_github (func):
         body = await req.body()
         log.debug("checking for security %s", payload)
         verify_signature(body, secret, key)
+        log.debug(f"{payload}")
         if event == "pull_request" and \
            payload.action == "closed" and \
            payload.pull_request.base.ref == "main" and\
            payload.pull_request.merged:
             return func()
+        log.info("Request not satisfying.")
         raise HTTPException(status.HTTP_200_OK)
     return webhook_pullrequest_from_git
 #+end_src
 
 #+RESULTS:
+: None
 
 Die Vorlage für ~verify_signature~ ist aus einem [[https://docs.github.com/de/webhooks/using-webhooks/validating-webhook-deliveries#python-example][Beispiel von github]] kopiert.
 
+Geprüft wird, dass der mit ~secret_token~ errechnete Hash von
+~payload_body~ mit ~signature_header~ übereinstimmt. Das beweist die
+Authentizität der Nachricht.
+
+Im Fehlerfall und bei Abweichungen wird HTTP-Statuscode 403 ausgelöst.
+
 #+begin_src python :tangle "build/app/webhook.py" :noweb tangle
 def verify_signature(payload_body, secret_token, signature_header):
-    """Verify that the payload was sent from GitHub by validating SHA256.
-
-    Raise and return 403 if not authorized.
-
-    Args:
-        payload_body: original request body to verify (request.body())
-        secret_token: GitHub app webhook token (WEBHOOK_SECRET)
-        signature_header: header received from GitHub (x-hub-signature-256)
-    """
     if not signature_header:
-        raise HTTPException(status_code=403, detail="signature header is missing!")
+        raise HTTPException(status_code=403, detail="signature header missing!")
     hash_object = hmac.new(secret_token.encode('utf-8'), msg=payload_body, digestmod=hashlib.sha256)
     expected_signature = "sha256=" + hash_object.hexdigest()
     log.debug(f"expected_signature {expected_signature}")
     if not hmac.compare_digest(expected_signature, signature_header):
-        raise HTTPException(status_code=403, detail="Request signatures didn't match!")
+        raise HTTPException(status_code=403, detail="signatures didn't match!")
 #+end_src
 
 #+RESULTS:
@@ -405,6 +420,8 @@ def run_update_db():
         logger.debug("Mid in run_update_db")
         res = chain(list_files.s(), map_in_group.s(), compare_categories.s(), update_gitid.si())
         return res()
+    else:
+        logger.info("Update not triggered.")
     return False
 
 @app.task
@@ -452,6 +469,72 @@ celery multi start -A app.tasks worker -B -s /var/log/celery/celerybeat-schedule
 
 Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt (Block =pre-start=).
 
+* Statische Seite
+
+** Deklaration in der Anwendung
+
+#+begin_src python :noweb-ref "Mount static files"
+from fastapi.staticfiles import StaticFiles
+app.mount("/static", StaticFiles(directory="/static"), name="static")
+
+from fastapi.responses import FileResponse
+
+@app.get("/favicon.ico", include_in_schema=False)
+def get_icon():
+    return FileResponse("/static/favicon.ico")
+#+end_src
+
+Die Datei =favicon.ico= wurde mit einem Generator erstellt.
+
+** Die Seite selbst
+
+Die Basis des Codes ist [[https://leanrada.com/htmz][htmz]], ein minimales Snippet zum Nachladen von Daten.
+
+#+begin_src html :tangle build/static/index.html
+<!DOCTYPE html>
+<html lang="de">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Fortunes</title>
+    <script>
+      function htmz(frame) {
+	  // Write your extensions here
+	  
+	  // The browser automatically scrolls DOM changes into view in response to user interaction.
+	  // This delay prevents that, making this is the only case where we don't lean on browser defaults.
+	  // Remove setTimeout wrapper to allow automatic scrolling.
+	  setTimeout(() => {
+	      let content = frame.contentDocument.body.childNodes
+	      if (content.length == 0) {
+		  t = document.createTextNode("")
+	      } else {
+		  j = JSON.parse(content[0].firstChild.data)
+		  t = document.createTextNode(j["text"])
+	      }
+	      let p = document.createElement("pre");
+	      p.appendChild(t)
+	      p.id = "my-element"
+
+	      document.querySelector(frame.contentWindow.location.hash || null)
+	      ?.replaceWith(p)
+
+	      let link = document.getElementById("knopf")
+	      link.href = link.href.replace(/(\&x=1\&x=1)?#/, "\&x=1#")
+	  })
+      }
+    </script>
+  </head>
+  <body>
+    <iframe hidden="" name="htmz" onload="window.htmz(this)"></iframe>
+
+    <a id="knopf" href="http://localhost/fortunes/v1?#my-element" target="htmz">Fortune</a>
+    <div id="frame"><div id="my-element"></div></div>
+  </body>
+</html>
+
+#+end_src
+
 * Bauen
 
 Die Abhängigkeiten für =pip= in der Datei =requirements.txt=.
@@ -467,7 +550,7 @@ celery
 Das =dockerfile= für Python und die Anwendung.
 
 #+begin_src dockerfile :tangle "build/dockerfile"
-FROM python:3.11-alpine
+FROM python:3.13-alpine
 RUN apk add --no-cache git
 WORKDIR /code
 COPY ./requirements.txt /code/requirements.txt
@@ -489,13 +572,13 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.5 .
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6-alpha .
 #+end_src
 #+RESULTS:
 : sha256:926d927fa34e2f53ac1a7290e1dbb1a0889ae4e7cab68e6eaae5e5fd06b622e6
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.5
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6-alpha
 #+end_src
 
 #+RESULTS:
@@ -555,6 +638,8 @@ services:
       - behind-proxy
     secrets:
       - github
+    volumes:
+      - "./static:/static"
     labels:
       - "traefik.enable=true"
       - "traefik.http.routers.fortune.entrypoints=web-secure"
@@ -592,6 +677,18 @@ Der Webserver =fortune= muss im gleichen Netzwerk (=behind-proxy=)
 liegen wie der Loadbalancer. Dies wird in der Konfiguration des
 Edge Routers/Proxies festgelegt.
 
+Die Konfiguration für RabbitMQ muss ergänzt werden. Dazu in der Datei =/etc/rabbitmq/conf.d/10-defaults.conf=
+einen Timeout einfügen:
+
+#+begin_src conf
+consumer_timeout = 172800000
+#+end_src
+
+*** TODO ~consumer_timeout~ automatisch mit Docker konfigurieren
+
+Die Konfigurationsoption in eine eigene Datei schreiben und als
+zusätzliche Datei in das Konfigurationsverzeichnis mounten.
+
 **  Link für interne Zwecke                                        :noexport:
 [[file:~/Sites/p4ffi.de/p4ffi.de.org::* Service reverse-proxy][Konfiguration für =p4ffi.de=]]
 
@@ -605,6 +702,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
+    image: berndpaffenholz/fortune
     ports:
       - "80:80"
 #+end_src
@@ -647,7 +745,7 @@ docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compos
 
 Das src_python[:eval never :exports code]{<<loglevel>>} für diese Anwendung:
 #+begin_src text :tangle no :noweb-ref loglevel
-INFO
+DEBUG
 #+end_src
 
 ** Testaufrufe
@@ -659,11 +757,11 @@ GET https://api.p4ffi.de/fortunes/v1
 #+RESULTS:
 : HTTP/2 200 
 : content-type: application/json
-: date: Sun, 16 Jul 2023 16:11:25 GMT
-: server: nginx/1.23.2
-: content-length: 163
+: date: Sat, 04 May 2024 19:11:06 GMT
+: server: uvicorn
+: content-length: 62
 : 
-: {"text": "Real computer scientists don't program in assembler.  They don't write\nin anything less portable than a number two pencil.\n", "category": "computers"}
+: {"text":"Serfs up!\n\t\t-- Spartacus\n","category":"politics"}
 
 #+begin_src http
 GET http://localhost:80/fortunes/v1
@@ -671,61 +769,118 @@ GET http://localhost:80/fortunes/v1
 
 #+RESULTS:
 : HTTP/1.1 200 OK
-: date: Mon, 07 Aug 2023 09:32:41 GMT
+: date: Sat, 04 May 2024 23:39:38 GMT
 : server: uvicorn
-: content-length: 114
+: content-length: 329
 : content-type: application/json
 : 
-: {"text":"Losing your drivers' license is just God's way of saying \"BOOGA, BOOGA!\"\n","category":"miscellaneous"}
+: {"text":"<Culus> dhd:  R you part of the secret debian overstructure?\n<dhd> no. there is no secret debian overstructure.\n<CosmicRay> although, now that somebody brought it up, let's start one\n            :-)\n<Knghtbrd> CosmicRay - why not, sounds like a fun way to spend the\n           afternoon =D\n","category":"knghtbrd"}
 
 #+begin_src http :pretty
 GET https://api.p4ffi.de/fortunes/v1/categories
 #+end_src
 
-| pratchett     |    3 | ok         | pratchett     |    3 |
-| ascii-art     |   10 | ok         | ascii-art     |   10 |
-| translate-me  |   12 | ok         | translate-me  |   12 |
-| magic         |   30 | ok         | magic         |   30 |
-| pets          |   52 | ok         | pets          |   52 |
-| news          |   53 | ok         | news          |   53 |
-| goedel        |   54 | Abweichung | goedel        |   53 |
-| paradoxum     |   72 | ok         | paradoxum     |   72 |
-| medicine      |   74 | ok         | medicine      |   74 |
-| tao           |   82 | ok         | tao           |   82 |
-| debian        |   85 | ok         | debian        |   85 |
-| riddles       |  127 | ok         | riddles       |  127 |
-| sports        |  147 | ok         | sports        |  147 |
-| love          |  150 | ok         | love          |  150 |
-| kids          |  151 | ok         | kids          |  151 |
-| ethnic        |  162 | ok         | ethnic        |  162 |
-| food          |  197 | ok         | food          |  197 |
-| humorists     |  198 | ok         | humorists     |  198 |
-| education     |  205 | ok         | education     |  205 |
-| law           |  206 | ok         | law           |  206 |
-| drugs         |  207 | ok         | drugs         |  207 |
-| startrek      |  227 | ok         | startrek      |  227 |
-| shlomif-fav   |  247 | ok         | shlomif-fav   |  247 |
-| literature    |  263 | ok         | literature    |  263 |
-| perl          |  273 | ok         | perl          |  273 |
-| disclaimer    |  284 | ok         | disclaimer    |  284 |
-| linux         |  402 | ok         | linux         |  402 |
-| fortunes      |  431 | ok         | fortunes      |  431 |
-| wisdom        |  432 | ok         | wisdom        |  432 |
-| art           |  474 | ok         | art           |  474 |
-| platitudes    |  498 | ok         | platitudes    |  498 |
-| knghtbrd      |  540 | ok         | knghtbrd      |  540 |
-| zippy         |  548 | ok         | zippy         |  548 |
-| men-women     |  583 | ok         | men-women     |  583 |
-| science       |  626 | ok         | science       |  626 |
-| work          |  630 | ok         | work          |  630 |
-| miscellaneous |  651 | ok         | miscellaneous |  651 |
-| politics      |  704 | ok         | politics      |  704 |
-| songs-poems   |  720 | ok         | songs-poems   |  720 |
-| computers     | 1065 | ok         | computers     | 1065 |
-| cookie        | 1147 | ok         | cookie        | 1147 |
-| definitions   | 1203 | ok         | definitions   | 1203 |
-| people        | 1251 | ok         | people        | 1251 |
-#+TBLFM: $3=if(("$1"=="$4")&&($2==$5),ok,Abweichung)
+#+RESULTS:
+#+begin_example
+{
+  "drugs": 207,
+  "fortunes": 431,
+  "definitions": 1203,
+  "medicine": 74,
+  "the-x-files-taglines": 25,
+  "disclaimer": 284,
+  "sports": 147,
+  "humorists": 198,
+  "food": 197,
+  "debian": 85,
+  "computers": 1065,
+  "law": 206,
+  "platitudes": 498,
+  "perl": 273,
+  "shlomif-fav": 247,
+  "science": 626,
+  "men-women": 583,
+  "education": 205,
+  "translate-me": 12,
+  "goedel": 53,
+  "cookie": 1147,
+  "politics": 704,
+  "pratchett": 3,
+  "pets": 52,
+  "people": 1251,
+  "kids": 151,
+  "knghtbrd": 540,
+  "wisdom": 432,
+  "news": 53,
+  "love": 150,
+  "work": 630,
+  "literature": 264,
+  "linux": 402,
+  "tao": 82,
+  "magic": 30,
+  "riddles": 127,
+  "songs-poems": 720,
+  "paradoxum": 72,
+  "ascii-art": 10,
+  "art": 474,
+  "ethnic": 162,
+  "miscellaneous": 651,
+  "startrek": 227,
+  "zippy": 548
+}
+#+end_example
+
+| vorher               |      | Status     | aktuell              |       |    % |
+|----------------------+------+------------+----------------------+-------+------|
+| art                  |  474 | ok         | art                  |   474 | 3.06 |
+| ascii-art            |   10 | ok         | ascii-art            |    10 | 0.06 |
+| computers            | 1065 | ok         | computers            |  1065 | 6.87 |
+| cookie               | 1147 | ok         | cookie               |  1147 | 7.40 |
+| debian               |   85 | ok         | debian               |    85 | 0.55 |
+| definitions          | 1203 | ok         | definitions          |  1203 | 7.76 |
+| disclaimer           |  284 | ok         | disclaimer           |   284 | 1.83 |
+| drugs                |  207 | ok         | drugs                |   207 | 1.34 |
+| education            |  205 | ok         | education            |   205 | 1.32 |
+| ethnic               |  162 | ok         | ethnic               |   162 | 1.05 |
+| food                 |  197 | ok         | food                 |   197 | 1.27 |
+| fortunes             |  431 | ok         | fortunes             |   431 | 2.78 |
+| goedel               |   53 | ok         | goedel               |    53 | 0.34 |
+| humorists            |  198 | ok         | humorists            |   198 | 1.28 |
+| kids                 |  151 | ok         | kids                 |   151 | 0.97 |
+| knghtbrd             |  540 | ok         | knghtbrd             |   540 | 3.48 |
+| law                  |  206 | ok         | law                  |   206 | 1.33 |
+| linux                |  402 | ok         | linux                |   402 | 2.59 |
+| literature           |  263 | Abweichung | literature           |   264 | 1.70 |
+| love                 |  150 | ok         | love                 |   150 | 0.97 |
+| magic                |   30 | ok         | magic                |    30 | 0.19 |
+| medicine             |   74 | ok         | medicine             |    74 | 0.48 |
+| men-women            |  583 | ok         | men-women            |   583 | 3.76 |
+| miscellaneous        |  651 | ok         | miscellaneous        |   651 | 4.20 |
+| news                 |   53 | ok         | news                 |    53 | 0.34 |
+| paradoxum            |   72 | ok         | paradoxum            |    72 | 0.46 |
+| people               | 1251 | ok         | people               |  1251 | 8.07 |
+| perl                 |  273 | ok         | perl                 |   273 | 1.76 |
+| pets                 |   52 | ok         | pets                 |    52 | 0.34 |
+| platitudes           |  498 | ok         | platitudes           |   498 | 3.21 |
+| politics             |  704 | ok         | politics             |   704 | 4.54 |
+| pratchett            |    3 | ok         | pratchett            |     3 | 0.02 |
+| riddles              |  127 | ok         | riddles              |   127 | 0.82 |
+| science              |  626 | ok         | science              |   626 | 4.04 |
+| shlomif-fav          |  247 | ok         | shlomif-fav          |   247 | 1.59 |
+| songs-poems          |  720 | ok         | songs-poems          |   720 | 4.64 |
+| sports               |  147 | ok         | sports               |   147 | 0.95 |
+| startrek             |  227 | ok         | startrek             |   227 | 1.46 |
+| tao                  |   82 | ok         | tao                  |    82 | 0.53 |
+| the-x-files-taglines |    0 | Abweichung | the-x-files-taglines |    25 | 0.16 |
+| translate-me         |   12 | ok         | translate-me         |    12 | 0.08 |
+| wisdom               |  432 | ok         | wisdom               |   432 | 2.79 |
+| work                 |  630 | ok         | work                 |   630 | 4.06 |
+| zippy                |  548 | ok         | zippy                |   548 | 3.54 |
+|----------------------+------+------------+----------------------+-------+------|
+|                      |      |            | Summe                | 15501 |  100 |
+#+TBLFM: @2$3..@II$3=if(("$1"=="$4")&&($2==$5),ok,Abweichung)::$6=$5*100/@46$5;f2::@46$5=vsum(@I..II)
+
+*** Aufruf mit den Daten des GitHub-Webhook                        :noexport:
 
 #+NAME: geheimnis
 #+begin_src elisp :results silent :exports none
@@ -734,25 +889,31 @@ GET https://api.p4ffi.de/fortunes/v1/categories
 
 #+begin_src http :user (org-sbe "geheimnis")
 POST http://localhost/fortunes/v1
+Accept: */*
+User-Agent: GitHub-Hookshot/a778e6c
+X-GitHub-Delivery: c892d930-0cac-11ef-82fc-b6b3fae27e15
 X-GitHub-Event: pull_request
-X-Hub-Signature-256: sha256=e484d98006054def38eb71debbd575c989f42219feb7247284351ad052fe725c
-content-type: application/json
+X-GitHub-Hook-ID: 440385801
+X-GitHub-Hook-Installation-Target-ID: 607916704
+X-GitHub-Hook-Installation-Target-Type: repository
+X-Hub-Signature: sha1=de9f3bd2b2bde88d600fe48022f3a63398c1eebc
+X-Hub-Signature-256: sha256=b6117c749a4b53a2551560bf37ff81c80e1d93780f1fa20a98e3ff0627baeceb
 
 {
   "action": "closed",
-  "number": 1,
+  "number": 8,
   "pull_request": {
-    "url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/1",
-    "id": 1585075297,
-    "node_id": "PR_kwDOJDwSoM5eelRh",
-    "html_url": "https://github.com/BerndPaffenholz/fortune-mod/pull/1",
-    "diff_url": "https://github.com/BerndPaffenholz/fortune-mod/pull/1.diff",
-    "patch_url": "https://github.com/BerndPaffenholz/fortune-mod/pull/1.patch",
-    "issue_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/1",
-    "number": 1,
+    "url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8",
+    "id": 1858885407,
+    "node_id": "PR_kwDOJDwSoM5uzFcf",
+    "html_url": "https://github.com/BerndPaffenholz/fortune-mod/pull/8",
+    "diff_url": "https://github.com/BerndPaffenholz/fortune-mod/pull/8.diff",
+    "patch_url": "https://github.com/BerndPaffenholz/fortune-mod/pull/8.patch",
+    "issue_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8",
+    "number": 8,
     "state": "closed",
     "locked": false,
-    "title": "Update README.asciidoc",
+    "title": "Transfer Updates to main",
     "user": {
       "login": "BerndPaffenholz",
       "id": 48335072,
@@ -774,11 +935,11 @@ content-type: application/json
       "site_admin": false
     },
     "body": null,
-    "created_at": "2023-11-02T21:44:34Z",
-    "updated_at": "2023-11-04T16:16:17Z",
-    "closed_at": "2023-11-04T16:16:17Z",
-    "merged_at": "2023-11-04T16:16:17Z",
-    "merge_commit_sha": "6aa665573af176b128a7e47cbe7beeb8f3b3ab0a",
+    "created_at": "2024-05-07T19:03:55Z",
+    "updated_at": "2024-05-07T20:02:50Z",
+    "closed_at": "2024-05-07T20:02:50Z",
+    "merged_at": "2024-05-07T20:02:50Z",
+    "merge_commit_sha": "a6ab9367704114cf033ec5d08c9fbf8fa31d23a1",
     "assignee": null,
     "assignees": [
 
@@ -794,15 +955,15 @@ content-type: application/json
     ],
     "milestone": null,
     "draft": false,
-    "commits_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/1/commits",
-    "review_comments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/1/comments",
+    "commits_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/commits",
+    "review_comments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/comments",
     "review_comment_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/comments{/number}",
-    "comments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/1/comments",
-    "statuses_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/e5dd16a019aefef6766776588f47e2dd6f6e8358",
+    "comments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8/comments",
+    "statuses_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/a6ab9367704114cf033ec5d08c9fbf8fa31d23a1",
     "head": {
-      "label": "BerndPaffenholz:BerndPaffenholz-patch-1",
-      "ref": "BerndPaffenholz-patch-1",
-      "sha": "e5dd16a019aefef6766776588f47e2dd6f6e8358",
+      "label": "BerndPaffenholz:update20240502",
+      "ref": "update20240502",
+      "sha": "a6ab9367704114cf033ec5d08c9fbf8fa31d23a1",
       "user": {
         "login": "BerndPaffenholz",
         "id": 48335072,
@@ -890,14 +1051,14 @@ content-type: application/json
         "releases_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/releases{/id}",
         "deployments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/deployments",
         "created_at": "2023-02-28T23:50:17Z",
-        "updated_at": "2023-08-04T17:38:25Z",
-        "pushed_at": "2023-11-04T16:16:16Z",
+        "updated_at": "2024-05-06T19:57:34Z",
+        "pushed_at": "2024-05-07T20:02:49Z",
         "git_url": "git://github.com/BerndPaffenholz/fortune-mod.git",
         "ssh_url": "git@github.com:BerndPaffenholz/fortune-mod.git",
         "clone_url": "https://github.com/BerndPaffenholz/fortune-mod.git",
         "svn_url": "https://github.com/BerndPaffenholz/fortune-mod",
         "homepage": "https://github.com/shlomif/fortune-mod",
-        "size": 4101,
+        "size": 4104,
         "stargazers_count": 0,
         "watchers_count": 0,
         "language": null,
@@ -944,9 +1105,9 @@ content-type: application/json
       }
     },
     "base": {
-      "label": "BerndPaffenholz:test1",
-      "ref": "test1",
-      "sha": "99d724cffb74f83717651734440a1fea3d8147e3",
+      "label": "BerndPaffenholz:main",
+      "ref": "main",
+      "sha": "b18c29252d72b16b43e5b3991da121a75be99fd7",
       "user": {
         "login": "BerndPaffenholz",
         "id": 48335072,
@@ -1034,14 +1195,14 @@ content-type: application/json
         "releases_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/releases{/id}",
         "deployments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/deployments",
         "created_at": "2023-02-28T23:50:17Z",
-        "updated_at": "2023-08-04T17:38:25Z",
-        "pushed_at": "2023-11-04T16:16:16Z",
+        "updated_at": "2024-05-06T19:57:34Z",
+        "pushed_at": "2024-05-07T20:02:49Z",
         "git_url": "git://github.com/BerndPaffenholz/fortune-mod.git",
         "ssh_url": "git@github.com:BerndPaffenholz/fortune-mod.git",
         "clone_url": "https://github.com/BerndPaffenholz/fortune-mod.git",
         "svn_url": "https://github.com/BerndPaffenholz/fortune-mod",
         "homepage": "https://github.com/shlomif/fortune-mod",
-        "size": 4101,
+        "size": 4104,
         "stargazers_count": 0,
         "watchers_count": 0,
         "language": null,
@@ -1089,28 +1250,28 @@ content-type: application/json
     },
     "_links": {
       "self": {
-        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/1"
+        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8"
       },
       "html": {
-        "href": "https://github.com/BerndPaffenholz/fortune-mod/pull/1"
+        "href": "https://github.com/BerndPaffenholz/fortune-mod/pull/8"
       },
       "issue": {
-        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/1"
+        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8"
       },
       "comments": {
-        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/1/comments"
+        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8/comments"
       },
       "review_comments": {
-        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/1/comments"
+        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/comments"
       },
       "review_comment": {
         "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/comments{/number}"
       },
       "commits": {
-        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/1/commits"
+        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/commits"
       },
       "statuses": {
-        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/e5dd16a019aefef6766776588f47e2dd6f6e8358"
+        "href": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/a6ab9367704114cf033ec5d08c9fbf8fa31d23a1"
       }
     },
     "author_association": "OWNER",
@@ -1143,10 +1304,10 @@ content-type: application/json
     "comments": 0,
     "review_comments": 0,
     "maintainer_can_modify": false,
-    "commits": 1,
+    "commits": 5,
     "additions": 1,
-    "deletions": 1,
-    "changed_files": 1
+    "deletions": 7,
+    "changed_files": 2
   },
   "repository": {
     "id": 607916704,
@@ -1215,14 +1376,14 @@ content-type: application/json
     "releases_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/releases{/id}",
     "deployments_url": "https://api.github.com/repos/BerndPaffenholz/fortune-mod/deployments",
     "created_at": "2023-02-28T23:50:17Z",
-    "updated_at": "2023-08-04T17:38:25Z",
-    "pushed_at": "2023-11-04T16:16:16Z",
+    "updated_at": "2024-05-06T19:57:34Z",
+    "pushed_at": "2024-05-07T20:02:49Z",
     "git_url": "git://github.com/BerndPaffenholz/fortune-mod.git",
     "ssh_url": "git@github.com:BerndPaffenholz/fortune-mod.git",
     "clone_url": "https://github.com/BerndPaffenholz/fortune-mod.git",
     "svn_url": "https://github.com/BerndPaffenholz/fortune-mod",
     "homepage": "https://github.com/shlomif/fortune-mod",
-    "size": 4101,
+    "size": 4104,
     "stargazers_count": 0,
     "watchers_count": 0,
     "language": null,
@@ -1280,13 +1441,13 @@ content-type: application/json
 #+end_src
 
 #+RESULTS:
-: HTTP/1.1 200 OK
-: date: Mon, 13 Nov 2023 21:25:35 GMT
+: HTTP/1.1 422 Unprocessable Entity
+: date: Sun, 12 May 2024 22:57:22 GMT
 : server: uvicorn
-: content-length: 15
+: content-length: 30649
 : content-type: application/json
 : 
-: {"detail":"OK"}
+: {"detail":[{"type":"model_attributes_type","loc":["body"],"msg":"Input should be a valid dictionary or object to extract fields from","input":"{  \"action\": \"closed\",  \"number\": 8,  \"pull_request\": {    \"url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8\",    \"id\": 1858885407,    \"node_id\": \"PR_kwDOJDwSoM5uzFcf\",    \"html_url\": \"https://github.com/BerndPaffenholz/fortune-mod/pull/8\",    \"diff_url\": \"https://github.com/BerndPaffenholz/fortune-mod/pull/8.diff\",    \"patch_url\": \"https://github.com/BerndPaffenholz/fortune-mod/pull/8.patch\",    \"issue_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8\",    \"number\": 8,    \"state\": \"closed\",    \"locked\": false,    \"title\": \"Transfer Updates to main\",    \"user\": {      \"login\": \"BerndPaffenholz\",      \"id\": 48335072,      \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",      \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",      \"gravatar_id\": \"\",      \"url\": \"https://api.github.com/users/BerndPaffenholz\",      \"html_url\": \"https://github.com/BerndPaffenholz\",      \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",      \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",      \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",      \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",      \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",      \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",      \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",      \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",      \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",      \"type\": \"User\",      \"site_admin\": false    },    \"body\": null,    \"created_at\": \"2024-05-07T19:03:55Z\",    \"updated_at\": \"2024-05-07T20:02:50Z\",    \"closed_at\": \"2024-05-07T20:02:50Z\",    \"merged_at\": \"2024-05-07T20:02:50Z\",    \"merge_commit_sha\": \"a6ab9367704114cf033ec5d08c9fbf8fa31d23a1\",    \"assignee\": null,    \"assignees\": [    ],    \"requested_reviewers\": [    ],    \"requested_teams\": [    ],    \"labels\": [    ],    \"milestone\": null,    \"draft\": false,    \"commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/commits\",    \"review_comments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/comments\",    \"review_comment_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/comments{/number}\",    \"comments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8/comments\",    \"statuses_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/a6ab9367704114cf033ec5d08c9fbf8fa31d23a1\",    \"head\": {      \"label\": \"BerndPaffenholz:update20240502\",      \"ref\": \"update20240502\",      \"sha\": \"a6ab9367704114cf033ec5d08c9fbf8fa31d23a1\",      \"user\": {        \"login\": \"BerndPaffenholz\",        \"id\": 48335072,        \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",        \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",        \"gravatar_id\": \"\",        \"url\": \"https://api.github.com/users/BerndPaffenholz\",        \"html_url\": \"https://github.com/BerndPaffenholz\",        \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",        \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",        \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",        \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",        \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",        \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",        \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",        \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",        \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",        \"type\": \"User\",        \"site_admin\": false      },      \"repo\": {        \"id\": 607916704,        \"node_id\": \"R_kgDOJDwSoA\",        \"name\": \"fortune-mod\",        \"full_name\": \"BerndPaffenholz/fortune-mod\",        \"private\": false,        \"owner\": {          \"login\": \"BerndPaffenholz\",          \"id\": 48335072,          \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",          \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",          \"gravatar_id\": \"\",          \"url\": \"https://api.github.com/users/BerndPaffenholz\",          \"html_url\": \"https://github.com/BerndPaffenholz\",          \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",          \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",          \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",          \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",          \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",          \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",          \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",          \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",          \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",          \"type\": \"User\",          \"site_admin\": false        },        \"html_url\": \"https://github.com/BerndPaffenholz/fortune-mod\",        \"description\": \"This is a clone of:\",        \"fork\": true,        \"url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod\",        \"forks_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/forks\",        \"keys_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/keys{/key_id}\",        \"collaborators_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/collaborators{/collaborator}\",        \"teams_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/teams\",        \"hooks_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/hooks\",        \"issue_events_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/events{/number}\",        \"events_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/events\",        \"assignees_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/assignees{/user}\",        \"branches_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/branches{/branch}\",        \"tags_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/tags\",        \"blobs_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/blobs{/sha}\",        \"git_tags_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/tags{/sha}\",        \"git_refs_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/refs{/sha}\",        \"trees_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/trees{/sha}\",        \"statuses_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/{sha}\",        \"languages_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/languages\",        \"stargazers_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/stargazers\",        \"contributors_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/contributors\",        \"subscribers_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/subscribers\",        \"subscription_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/subscription\",        \"commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/commits{/sha}\",        \"git_commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/commits{/sha}\",        \"comments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/comments{/number}\",        \"issue_comment_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/comments{/number}\",        \"contents_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/contents/{+path}\",        \"compare_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/compare/{base}...{head}\",        \"merges_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/merges\",        \"archive_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/{archive_format}{/ref}\",        \"downloads_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/downloads\",        \"issues_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues{/number}\",        \"pulls_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls{/number}\",        \"milestones_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/milestones{/number}\",        \"notifications_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/notifications{?since,all,participating}\",        \"labels_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/labels{/name}\",        \"releases_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/releases{/id}\",        \"deployments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/deployments\",        \"created_at\": \"2023-02-28T23:50:17Z\",        \"updated_at\": \"2024-05-06T19:57:34Z\",        \"pushed_at\": \"2024-05-07T20:02:49Z\",        \"git_url\": \"git://github.com/BerndPaffenholz/fortune-mod.git\",        \"ssh_url\": \"git@github.com:BerndPaffenholz/fortune-mod.git\",        \"clone_url\": \"https://github.com/BerndPaffenholz/fortune-mod.git\",        \"svn_url\": \"https://github.com/BerndPaffenholz/fortune-mod\",        \"homepage\": \"https://github.com/shlomif/fortune-mod\",        \"size\": 4104,        \"stargazers_count\": 0,        \"watchers_count\": 0,        \"language\": null,        \"has_issues\": false,        \"has_projects\": true,        \"has_downloads\": true,        \"has_wiki\": true,        \"has_pages\": false,        \"has_discussions\": false,        \"forks_count\": 0,        \"mirror_url\": null,        \"archived\": false,        \"disabled\": false,        \"open_issues_count\": 0,        \"license\": {          \"key\": \"other\",          \"name\": \"Other\",          \"spdx_id\": \"NOASSERTION\",          \"url\": null,          \"node_id\": \"MDc6TGljZW5zZTA=\"        },        \"allow_forking\": true,        \"is_template\": false,        \"web_commit_signoff_required\": false,        \"topics\": [        ],        \"visibility\": \"public\",        \"forks\": 0,        \"open_issues\": 0,        \"watchers\": 0,        \"default_branch\": \"main\",        \"allow_squash_merge\": true,        \"allow_merge_commit\": true,        \"allow_rebase_merge\": true,        \"allow_auto_merge\": false,        \"delete_branch_on_merge\": false,        \"allow_update_branch\": false,        \"use_squash_pr_title_as_default\": false,        \"squash_merge_commit_message\": \"COMMIT_MESSAGES\",        \"squash_merge_commit_title\": \"COMMIT_OR_PR_TITLE\",        \"merge_commit_message\": \"PR_TITLE\",        \"merge_commit_title\": \"MERGE_MESSAGE\"      }    },    \"base\": {      \"label\": \"BerndPaffenholz:main\",      \"ref\": \"main\",      \"sha\": \"b18c29252d72b16b43e5b3991da121a75be99fd7\",      \"user\": {        \"login\": \"BerndPaffenholz\",        \"id\": 48335072,        \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",        \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",        \"gravatar_id\": \"\",        \"url\": \"https://api.github.com/users/BerndPaffenholz\",        \"html_url\": \"https://github.com/BerndPaffenholz\",        \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",        \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",        \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",        \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",        \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",        \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",        \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",        \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",        \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",        \"type\": \"User\",        \"site_admin\": false      },      \"repo\": {        \"id\": 607916704,        \"node_id\": \"R_kgDOJDwSoA\",        \"name\": \"fortune-mod\",        \"full_name\": \"BerndPaffenholz/fortune-mod\",        \"private\": false,        \"owner\": {          \"login\": \"BerndPaffenholz\",          \"id\": 48335072,          \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",          \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",          \"gravatar_id\": \"\",          \"url\": \"https://api.github.com/users/BerndPaffenholz\",          \"html_url\": \"https://github.com/BerndPaffenholz\",          \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",          \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",          \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",          \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",          \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",          \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",          \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",          \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",          \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",          \"type\": \"User\",          \"site_admin\": false        },        \"html_url\": \"https://github.com/BerndPaffenholz/fortune-mod\",        \"description\": \"This is a clone of:\",        \"fork\": true,        \"url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod\",        \"forks_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/forks\",        \"keys_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/keys{/key_id}\",        \"collaborators_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/collaborators{/collaborator}\",        \"teams_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/teams\",        \"hooks_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/hooks\",        \"issue_events_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/events{/number}\",        \"events_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/events\",        \"assignees_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/assignees{/user}\",        \"branches_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/branches{/branch}\",        \"tags_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/tags\",        \"blobs_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/blobs{/sha}\",        \"git_tags_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/tags{/sha}\",        \"git_refs_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/refs{/sha}\",        \"trees_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/trees{/sha}\",        \"statuses_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/{sha}\",        \"languages_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/languages\",        \"stargazers_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/stargazers\",        \"contributors_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/contributors\",        \"subscribers_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/subscribers\",        \"subscription_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/subscription\",        \"commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/commits{/sha}\",        \"git_commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/commits{/sha}\",        \"comments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/comments{/number}\",        \"issue_comment_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/comments{/number}\",        \"contents_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/contents/{+path}\",        \"compare_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/compare/{base}...{head}\",        \"merges_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/merges\",        \"archive_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/{archive_format}{/ref}\",        \"downloads_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/downloads\",        \"issues_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues{/number}\",        \"pulls_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls{/number}\",        \"milestones_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/milestones{/number}\",        \"notifications_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/notifications{?since,all,participating}\",        \"labels_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/labels{/name}\",        \"releases_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/releases{/id}\",        \"deployments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/deployments\",        \"created_at\": \"2023-02-28T23:50:17Z\",        \"updated_at\": \"2024-05-06T19:57:34Z\",        \"pushed_at\": \"2024-05-07T20:02:49Z\",        \"git_url\": \"git://github.com/BerndPaffenholz/fortune-mod.git\",        \"ssh_url\": \"git@github.com:BerndPaffenholz/fortune-mod.git\",        \"clone_url\": \"https://github.com/BerndPaffenholz/fortune-mod.git\",        \"svn_url\": \"https://github.com/BerndPaffenholz/fortune-mod\",        \"homepage\": \"https://github.com/shlomif/fortune-mod\",        \"size\": 4104,        \"stargazers_count\": 0,        \"watchers_count\": 0,        \"language\": null,        \"has_issues\": false,        \"has_projects\": true,        \"has_downloads\": true,        \"has_wiki\": true,        \"has_pages\": false,        \"has_discussions\": false,        \"forks_count\": 0,        \"mirror_url\": null,        \"archived\": false,        \"disabled\": false,        \"open_issues_count\": 0,        \"license\": {          \"key\": \"other\",          \"name\": \"Other\",          \"spdx_id\": \"NOASSERTION\",          \"url\": null,          \"node_id\": \"MDc6TGljZW5zZTA=\"        },        \"allow_forking\": true,        \"is_template\": false,        \"web_commit_signoff_required\": false,        \"topics\": [        ],        \"visibility\": \"public\",        \"forks\": 0,        \"open_issues\": 0,        \"watchers\": 0,        \"default_branch\": \"main\",        \"allow_squash_merge\": true,        \"allow_merge_commit\": true,        \"allow_rebase_merge\": true,        \"allow_auto_merge\": false,        \"delete_branch_on_merge\": false,        \"allow_update_branch\": false,        \"use_squash_pr_title_as_default\": false,        \"squash_merge_commit_message\": \"COMMIT_MESSAGES\",        \"squash_merge_commit_title\": \"COMMIT_OR_PR_TITLE\",        \"merge_commit_message\": \"PR_TITLE\",        \"merge_commit_title\": \"MERGE_MESSAGE\"      }    },    \"_links\": {      \"self\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8\"      },      \"html\": {        \"href\": \"https://github.com/BerndPaffenholz/fortune-mod/pull/8\"      },      \"issue\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8\"      },      \"comments\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/8/comments\"      },      \"review_comments\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/comments\"      },      \"review_comment\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/comments{/number}\"      },      \"commits\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls/8/commits\"      },      \"statuses\": {        \"href\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/a6ab9367704114cf033ec5d08c9fbf8fa31d23a1\"      }    },    \"author_association\": \"OWNER\",    \"auto_merge\": null,    \"active_lock_reason\": null,    \"merged\": true,    \"mergeable\": null,    \"rebaseable\": null,    \"mergeable_state\": \"unknown\",    \"merged_by\": {      \"login\": \"BerndPaffenholz\",      \"id\": 48335072,      \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",      \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",      \"gravatar_id\": \"\",      \"url\": \"https://api.github.com/users/BerndPaffenholz\",      \"html_url\": \"https://github.com/BerndPaffenholz\",      \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",      \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",      \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",      \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",      \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",      \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",      \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",      \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",      \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",      \"type\": \"User\",      \"site_admin\": false    },    \"comments\": 0,    \"review_comments\": 0,    \"maintainer_can_modify\": false,    \"commits\": 5,    \"additions\": 1,    \"deletions\": 7,    \"changed_files\": 2  },  \"repository\": {    \"id\": 607916704,    \"node_id\": \"R_kgDOJDwSoA\",    \"name\": \"fortune-mod\",    \"full_name\": \"BerndPaffenholz/fortune-mod\",    \"private\": false,    \"owner\": {      \"login\": \"BerndPaffenholz\",      \"id\": 48335072,      \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",      \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",      \"gravatar_id\": \"\",      \"url\": \"https://api.github.com/users/BerndPaffenholz\",      \"html_url\": \"https://github.com/BerndPaffenholz\",      \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",      \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",      \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",      \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",      \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",      \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",      \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",      \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",      \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",      \"type\": \"User\",      \"site_admin\": false    },    \"html_url\": \"https://github.com/BerndPaffenholz/fortune-mod\",    \"description\": \"This is a clone of:\",    \"fork\": true,    \"url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod\",    \"forks_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/forks\",    \"keys_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/keys{/key_id}\",    \"collaborators_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/collaborators{/collaborator}\",    \"teams_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/teams\",    \"hooks_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/hooks\",    \"issue_events_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/events{/number}\",    \"events_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/events\",    \"assignees_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/assignees{/user}\",    \"branches_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/branches{/branch}\",    \"tags_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/tags\",    \"blobs_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/blobs{/sha}\",    \"git_tags_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/tags{/sha}\",    \"git_refs_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/refs{/sha}\",    \"trees_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/trees{/sha}\",    \"statuses_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/statuses/{sha}\",    \"languages_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/languages\",    \"stargazers_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/stargazers\",    \"contributors_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/contributors\",    \"subscribers_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/subscribers\",    \"subscription_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/subscription\",    \"commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/commits{/sha}\",    \"git_commits_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/git/commits{/sha}\",    \"comments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/comments{/number}\",    \"issue_comment_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues/comments{/number}\",    \"contents_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/contents/{+path}\",    \"compare_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/compare/{base}...{head}\",    \"merges_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/merges\",    \"archive_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/{archive_format}{/ref}\",    \"downloads_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/downloads\",    \"issues_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/issues{/number}\",    \"pulls_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/pulls{/number}\",    \"milestones_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/milestones{/number}\",    \"notifications_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/notifications{?since,all,participating}\",    \"labels_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/labels{/name}\",    \"releases_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/releases{/id}\",    \"deployments_url\": \"https://api.github.com/repos/BerndPaffenholz/fortune-mod/deployments\",    \"created_at\": \"2023-02-28T23:50:17Z\",    \"updated_at\": \"2024-05-06T19:57:34Z\",    \"pushed_at\": \"2024-05-07T20:02:49Z\",    \"git_url\": \"git://github.com/BerndPaffenholz/fortune-mod.git\",    \"ssh_url\": \"git@github.com:BerndPaffenholz/fortune-mod.git\",    \"clone_url\": \"https://github.com/BerndPaffenholz/fortune-mod.git\",    \"svn_url\": \"https://github.com/BerndPaffenholz/fortune-mod\",    \"homepage\": \"https://github.com/shlomif/fortune-mod\",    \"size\": 4104,    \"stargazers_count\": 0,    \"watchers_count\": 0,    \"language\": null,    \"has_issues\": false,    \"has_projects\": true,    \"has_downloads\": true,    \"has_wiki\": true,    \"has_pages\": false,    \"has_discussions\": false,    \"forks_count\": 0,    \"mirror_url\": null,    \"archived\": false,    \"disabled\": false,    \"open_issues_count\": 0,    \"license\": {      \"key\": \"other\",      \"name\": \"Other\",      \"spdx_id\": \"NOASSERTION\",      \"url\": null,      \"node_id\": \"MDc6TGljZW5zZTA=\"    },    \"allow_forking\": true,    \"is_template\": false,    \"web_commit_signoff_required\": false,    \"topics\": [    ],    \"visibility\": \"public\",    \"forks\": 0,    \"open_issues\": 0,    \"watchers\": 0,    \"default_branch\": \"main\"  },  \"sender\": {    \"login\": \"BerndPaffenholz\",    \"id\": 48335072,    \"node_id\": \"MDQ6VXNlcjQ4MzM1MDcy\",    \"avatar_url\": \"https://avatars.githubusercontent.com/u/48335072?v=4\",    \"gravatar_id\": \"\",    \"url\": \"https://api.github.com/users/BerndPaffenholz\",    \"html_url\": \"https://github.com/BerndPaffenholz\",    \"followers_url\": \"https://api.github.com/users/BerndPaffenholz/followers\",    \"following_url\": \"https://api.github.com/users/BerndPaffenholz/following{/other_user}\",    \"gists_url\": \"https://api.github.com/users/BerndPaffenholz/gists{/gist_id}\",    \"starred_url\": \"https://api.github.com/users/BerndPaffenholz/starred{/owner}{/repo}\",    \"subscriptions_url\": \"https://api.github.com/users/BerndPaffenholz/subscriptions\",    \"organizations_url\": \"https://api.github.com/users/BerndPaffenholz/orgs\",    \"repos_url\": \"https://api.github.com/users/BerndPaffenholz/repos\",    \"events_url\": \"https://api.github.com/users/BerndPaffenholz/events{/privacy}\",    \"received_events_url\": \"https://api.github.com/users/BerndPaffenholz/received_events\",    \"type\": \"User\",    \"site_admin\": false  }}"}]}
 
 * ToDo                                                             :noexport:
 
@@ -1324,7 +1485,7 @@ Nach dem Style ergänzen:
 #+HTML_HEAD: <style>html {background-image: none;}</style>
 #+end_src
 
-** TODO Security token für POST /fortunes etablieren
+** DONE Security token für POST /fortunes etablieren
 
 Bisher wird das Repository zeitgesteuert überprüft. Dies soll nun auf
 einen Push-Mechanismus umgestellt werden. github kann bei bestimmten
@@ -1333,6 +1494,8 @@ dienen.
 
 Dazu soll die Passwort-Abfrage auf dem POST entfernt
 werden. Stattdessen wird ein Mechanismus von github benutzt.
+
+Mit Version 1.5 wurde dies produktiv.
 
 *** DONE Untersuchung Security Mechanismen FastAPI
 
@@ -1345,12 +1508,13 @@ im Webhook genutzt um die übergebenen Informationen von GitHub zu prüfen.
 
 Implementierung der [[*Webhook][Webhooks]] nach diesen [[*Webhooks Test][Experimenten]].
 
+** TODO Dokumentation verbessern
 * Deploy to target
 
 #+begin_src bash :results silent :var not_needed=(org-babel-tangle)
-docker image push -q berndpaffenholz/fortune:1.5
+#docker image push -q berndpaffenholz/fortune:1.6-alpha
 scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
-ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortune:1.5 && docker compose up --quiet-pull -d"
+ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q berndpaffenholz/fortune:1.5 && docker compose up --force-recreate --quiet-pull --pull always -d"
 #+end_src
 
 * Hilfsmittel                                                      :noexport:
@@ -1363,6 +1527,27 @@ ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker image pull -q bernd
 #+END_SRC
 
 * Probieren                                                        :noexport: 
+#+begin_src python
+import sys
+return sys.version
+#+end_src
+
+#+RESULTS:
+: 3.12.1 (main, Dec  9 2023, 07:49:01) [Clang 13.1.6 (clang-1316.0.21.2.5)]
+
+** JSON test
+
+#+begin_src python
+import build.app.webhook as wh
+
+def tt (payload: wh.PayloadPullRequest):
+    return payload["action"]
+
+return tt({"action": 1})
+#+end_src
+
+#+RESULTS:
+: 1
 
 ** Webhooks Test
 #+begin_src python :results output
