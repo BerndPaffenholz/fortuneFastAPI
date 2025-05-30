@@ -100,6 +100,7 @@ DESCRIPTION="""Every one goes with a quote.
 See <a href="https://linux.die.net/man/6/fortune">fortune</a>.
 Quotes are from <a href="https://github.com/BerndPaffenholz/fortune-mod.git">here</a>
 which is a clone from <a href="https://github.com/shlomif/fortune-mod">fortune-mod</a>.
+The fortunes from directory <code>off</code> are omitted.
 """
 
 app = FastAPI(
@@ -585,15 +586,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.1 .
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.2 .
 #+end_src
 #+RESULTS:
-: sha256:def278662be080d8cfc47a5a62ffbb9a6e2bc6f9317a315f9bb0cbe537da17c4
+: sha256:82541af85cd1dcd3fe93e5508a670411381630520379ec1a2ee829b001eb6251
 
 *** Zum Ausprobieren                                               :noexport:
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.1
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.2
 #+end_src
 
 #+RESULTS:
@@ -647,7 +648,7 @@ services:
       - "./rabbitmq/50-timeout.conf:/etc/rabbitmq/conf.d/50-timeout.conf"
 
   fortune:
-    image: berndpaffenholz/fortune:1.6.1
+    image: berndpaffenholz/fortune:1.6.2
     restart: always
     build: .
     networks:
@@ -716,7 +717,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
-    image: berndpaffenholz/fortune:1.6.1
+    image: berndpaffenholz/fortune:1.6.2
     ports:
       - "80:80"
 #+end_src
@@ -1574,7 +1575,7 @@ ist nach der Fertigstellung das Image zu pushen. Dies funktioniert
 nur, wenn man im Docker Desktop mit einem Account eigeloggt ist.
 
 #+begin_src bash :results silent
-docker image push -q berndpaffenholz/fortune:1.6.1
+docker image push -q berndpaffenholz/fortune:1.6.2
 #+end_src
 
 Aktualisieren der Dateien (compose yaml und sonstige), refresh aller
@@ -1622,27 +1623,34 @@ return tt({"action": 1})
 ** Webhooks Test
 #+begin_src python :results output
 def check_webhook_for(func):
-    print (f"webhook {func}")
-    def new_func (payload):
+    print(f"webhook {func}")
+
+    def new_func(payload):
         print("checking for security")
         return func(payload)
+
     return new_func
 
-def webhookP (source: str, kind: str):
-    print (f"{source} {kind}")
+
+def webhookP(source: str, kind: str):
+    print(f"{source} {kind}")
     return check_webhook_for
-            
-def webhook (func):
-    print (f"{func}")
+
+
+def webhook(func):
+    print(f"{func}")
     return check_webhook_for(func)
 
-@webhookP("github","push")
+
+@webhookP("github", "push")
 def update_fortunes_database(payload) -> dict:
     print(f"update_fortunes_database {payload}")
+
 
 print("running...")
 update_fortunes_database("y")
 print("...end")
+
 #+end_src
 
 #+RESULTS:
