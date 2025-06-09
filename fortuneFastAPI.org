@@ -553,7 +553,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.2 .
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.3 .
 #+end_src
 #+RESULTS:
 : sha256:82541af85cd1dcd3fe93e5508a670411381630520379ec1a2ee829b001eb6251
@@ -561,7 +561,7 @@ docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.2 .
 *** Zum Ausprobieren                                               :noexport:
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.2
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.3
 #+end_src
 
 #+RESULTS:
@@ -615,7 +615,7 @@ services:
       - "./rabbitmq/50-timeout.conf:/etc/rabbitmq/conf.d/50-timeout.conf"
 
   fortune:
-    image: berndpaffenholz/fortune:1.6.2
+    image: berndpaffenholz/fortune:1.6.3
     restart: always
     build: .
     networks:
@@ -684,7 +684,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
-    image: berndpaffenholz/fortune:1.6.2
+    image: berndpaffenholz/fortune:1.6.3
     ports:
       - "80:80"
 #+end_src
@@ -1542,7 +1542,7 @@ ist nach der Fertigstellung das Image zu pushen. Dies funktioniert
 nur, wenn man im Docker Desktop mit einem Account eigeloggt ist.
 
 #+begin_src bash :results silent
-docker image push -q berndpaffenholz/fortune:1.6.2
+docker image push -q berndpaffenholz/fortune:1.6.3
 #+end_src
 
 Aktualisieren der Dateien (compose yaml und sonstige), refresh aller
