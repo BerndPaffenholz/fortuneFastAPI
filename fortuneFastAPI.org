@@ -507,44 +507,11 @@ Die Basis des Codes ist [[https://leanrada.com/htmz][htmz]], ein minimales Snipp
 
 #+begin_src html :tangle build/static/index.html
 <!DOCTYPE html>
-<html lang="de">
-  <head>
-    <meta charset="utf-8">
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Fortunes</title>
-    <script>
-      function htmz(frame) {
-	  // Write your extensions here
-	  
-	  // The browser automatically scrolls DOM changes into view in response to user interaction.
-	  // This delay prevents that, making this is the only case where we don't lean on browser defaults.
-	  // Remove setTimeout wrapper to allow automatic scrolling.
-	  setTimeout(() => {
-	      let content = frame.contentDocument.body.childNodes
-	      if (content.length == 0) {
-		  t = document.createTextNode("")
-	      } else {
-		  j = JSON.parse(content[0].firstChild.data)
-		  t = document.createTextNode(j["text"])
-	      }
-	      let p = document.createElement("pre");
-	      p.appendChild(t)
-	      p.id = "my-element"
-
-	      document.querySelector(frame.contentWindow.location.hash || null)
-	      ?.replaceWith(p)
-
-	      let link = document.getElementById("knopf")
-	      link.href = link.href.replace(/(\&x=1\&x=1)?#/, "\&x=1#")
-	  })
-      }
-    </script>
-  </head>
+<html>
+  <head><title>Fortunes</title></head>
   <body>
-    <iframe hidden="" name="htmz" onload="window.htmz(this)"></iframe>
-
-    <a id="knopf" href="https:/fortunes/v1?#my-element" target="htmz">Fortune</a>
-    <div id="frame"><div id="my-element"></div></div>
+    <button onclick="fetch('/fortunes/v1').then(x => x.text()).then(y => document.getElementById('out').innerHTML=JSON.parse(y).text)">Fresh Fortune</button>
+    <pre id="out"></pre>
   </body>
 </html>
 
