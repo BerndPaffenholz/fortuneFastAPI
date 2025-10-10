@@ -153,6 +153,8 @@ def get_one_random_cookie():
         raise HTTPException(status_code=404, detail=not_found.args[0])
 #+end_src
 
+#+RESULTS:
+
 <<webhook_use>>
 Die Definition des ~webhook~-Dekorators ist ein eigenes [[Webhook][Modul]].
 
@@ -318,7 +320,7 @@ def list_categories () -> dict:
     return stats
 
 def init_app(_app):
-    if not DATABASENAME in  mongodb.list_database_names():
+    if not DATABASENAME in mongodb.list_database_names():
         log.warning("no database")
         mongodb[DATABASENAME].config.insert_one({"name": 'git-commit-id', "value": None})
         return False
@@ -488,6 +490,8 @@ Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt (Block 
 
 ** Deklaration in der Anwendung
 
+Die Referenz =Mount static files= bindet den folgenden Code ein:
+
 #+begin_src python :noweb-ref "Mount static files"
 from fastapi.staticfiles import StaticFiles
 app.mount("/static", StaticFiles(directory="/static"), name="static")
@@ -503,7 +507,7 @@ Die Datei =favicon.ico= wurde mit einem Generator erstellt.
 
 ** Die Seite selbst
 
-Die Basis des Codes ist [[https://leanrada.com/htmz][htmz]], ein minimales Snippet zum Nachladen von Daten.
+Dieser Code ist inspiriert durch [[https://leanrada.com/htmz][htmz]], ein minimales Snippet zum Nachladen von Daten.
 
 #+begin_src html :tangle build/static/index.html
 <!DOCTYPE html>
@@ -543,7 +547,7 @@ EXPOSE 80/tcp
 CMD ["app/start.sh"]
 #+end_src
 
-Die Startdatei.
+Die Startdatei =app/start.sh=:
 
 #+begin_src bash :shebang "#!/bin/sh" :tangle "build/app/start.sh" :noweb tangle
 <<pre-start>>
@@ -553,7 +557,7 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.4 .
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.5 .
 #+end_src
 #+RESULTS:
 : sha256:2e7966bae3fcb66b3e1b2684928a8aa9bb78792bfab3dfa8f829894d2973e441
@@ -561,7 +565,7 @@ docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.4 .
 *** Zum Ausprobieren                                               :noexport:
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.3
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.5
 #+end_src
 
 #+RESULTS:
@@ -615,7 +619,7 @@ services:
       - "./rabbitmq/50-timeout.conf:/etc/rabbitmq/conf.d/50-timeout.conf"
 
   fortune:
-    image: berndpaffenholz/fortune:1.6.4
+    image: berndpaffenholz/fortune:1.6.5
     restart: always
     build: .
     networks:
@@ -658,7 +662,15 @@ Der Webserver =fortune= muss im gleichen Netzwerk (=behind-proxy=)
 liegen wie der Loadbalancer. Dies wird in der Konfiguration des
 Edge Routers/Proxies festgelegt.
 
-Die Konfiguration für RabbitMQ muss ergänzt werden. Dazu in der Datei =/etc/rabbitmq/conf.d/10-defaults.conf=
+Die Datei =secrets= enthält das geheime Token (secret) aus
+=/settings/hooks= des Repositories in =github=. Diese Datei muss
+im =build=-Verzeichnis erstellt werden, sie wird dann beim Deployment
+mit kopiert. Wenn das zu unsicher ist, dann muss sie direkt auf dem
+Zielserver angelegt werden und im gleichen Verzeichnis wie die
+=docker-compose.yml= liegen. Das Anlegen der Datei ist ein manueller
+Prozess.
+
+Die Konfiguration für RabbitMQ muss ergänzt werden. Dazu in der Datei =/etc/rabbitmq/conf.d/50-defaults.conf=
 einen Timeout einfügen:
 
 #+begin_src conf :tangle build/rabbitmq/50-timeout.conf
@@ -684,7 +696,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
-    image: berndpaffenholz/fortune:1.6.3
+    image: berndpaffenholz/fortune:1.6.5
     ports:
       - "80:80"
 #+end_src
@@ -758,153 +770,164 @@ GET http://localhost:80/fortunes/v1
 : 
 : {"text":"<Culus> dhd:  R you part of the secret debian overstructure?\n<dhd> no. there is no secret debian overstructure.\n<CosmicRay> although, now that somebody brought it up, let's start one\n            :-)\n<Knghtbrd> CosmicRay - why not, sounds like a fun way to spend the\n           afternoon =D\n","category":"knghtbrd"}
 
-#+begin_src http :pretty
+#+NAME: categories
+#+begin_src http :exports code :pretty 
 GET https://api.p4ffi.de/fortunes/v1/categories
 #+end_src
 
-#+RESULTS:
+#+RESULTS: categories
 #+begin_example
 {
-  "goedel": 53,
-  "education": 205,
-  "debian": 85,
-  "love": 150,
-  "sports": 147,
-  "platitudes": 498,
-  "science": 626,
-  "knghtbrd": 540,
-  "tao": 82,
-  "men-women": 583,
-  "paradoxum": 72,
-  "perl": 273,
-  "medicine": 74,
-  "art": 474,
-  "ascii-art": 10,
-  "computers": 1065,
-  "cookie": 1146,
-  "definitions": 1203,
-  "disclaimer": 284,
-  "drugs": 207,
-  "ethnic": 162,
-  "food": 197,
-  "fortunes": 431,
-  "humorists": 198,
-  "kids": 151,
-  "law": 206,
-  "linux": 402,
-  "literature": 263
-  "magic": 30,
-  "miscellaneous": 651,
-  "news": 53,
-  "people": 1250,
-  "pets": 52,
-  "politics": 704,
+  "knghtbrd": 539,
+  "news": 52,
   "pratchett": 3,
-  "riddles": 127,
+  "paradoxum": 70,
+  "work": 626,
+  "goedel": 52,
+  "songs-poems": 707,
+  "love": 150,
+  "miscellaneous": 644,
+  "drugs": 207,
+  "tao": 82,
+  "men-women": 581,
+  "perl": 272,
+  "magic": 30,
+  "science": 622,
+  "definitions": 1203,
+  "platitudes": 496,
+  "zippy": 546,
+  "pets": 51,
+  "cookie": 1134,
+  "medicine": 74,
+  "politics": 697,
+  "debian": 85,
+  "wisdom": 427,
+  "fortunes": 431,
   "shlomif-fav": 247,
-  "songs-poems": 720,
-  "startrek": 227,
+  "computers": 1066,
+  "education": 205,
+  "people": 1244,
+  "ascii-art": 10,
+  "art": 474,
+  "riddles": 127,
+  "startrek": 228,
   "the-x-files-taglines": 25,
   "translate-me": 12,
-  "wisdom": 432,
-  "work": 630,
-  "zippy": 548,
+  "linux": 398,
+  "literature": 260,
+  "kids": 151,
+  "food": 196,
+  "law": 206,
+  "disclaimer": 284,
+  "humorists": 197,
+  "sports": 146,
+  "ethnic": 162
 }
 #+end_example
-  art		 	 474
-  ascii-art		 10
-  computers		 1065
-  cookie		 1146
-  debian		 85
-  definitions		 1203
-  disclaimer		 284
-  drugs			 207
-  education		 205
-  ethnic		 162
-  food			 197
-  fortunes		 431
-  goedel		 53
-  humorists		 198
-  kids			 151
-  knghtbrd		 540
-  law		 	 206
-  linux		 	 402
-  literature		 263
-  love		 	 150
-  magic			 30
-  medicine		 74
-  men-women		 583
-  miscellaneous		 651
-  news		 	 53
-  paradoxum		 72
-  people		 1250
-  perl			 273
-  pets			 52
-  platitudes		 498
-  politics		 704
-  pratchett		 3
-  riddles		 127
-  science		 626
-  shlomif-fav		 247
-  songs-poems		 720
-  sports		 147
-  startrek		 227
-  tao		 	 82
-  the-x-files-taglines	 25
-  translate-me	 	 12
-  wisdom		 432
-  work			 630
-  zippy			 548 
 
-| vorher               |       | Status     | aktuell              |      |    % |
-|----------------------+-------+------------+----------------------+------+------|
-| art                  |   474 | ok         | art                  |  474 | 3.06 |
-| ascii-art            |    10 | ok         | ascii-art            |   10 | 0.06 |
-| computers            |  1065 | ok         | computers            | 1065 | 6.87 |
-| cookie               |  1147 | Abweichung | cookie               | 1146 | 7.40 |
-| debian               |    85 | ok         | debian               |   85 | 0.55 |
-| definitions          |  1203 | ok         | definitions          | 1203 | 7.76 |
-| disclaimer           |   284 | ok         | disclaimer           |  284 | 1.83 |
-| drugs                |   207 | ok         | drugs                |  207 | 1.34 |
-| education            |   205 | ok         | education            |  205 | 1.32 |
-| ethnic               |   162 | ok         | ethnic               |  162 | 1.05 |
-| food                 |   197 | ok         | food                 |  197 | 1.27 |
-| fortunes             |   431 | ok         | fortunes             |  431 | 2.78 |
-| goedel               |    53 | ok         | goedel               |   53 | 0.34 |
-| humorists            |   198 | ok         | humorists            |  198 | 1.28 |
-| kids                 |   151 | ok         | kids                 |  151 | 0.97 |
-| knghtbrd             |   540 | ok         | knghtbrd             |  540 | 3.48 |
-| law                  |   206 | ok         | law                  |  206 | 1.33 |
-| linux                |   402 | ok         | linux                |  402 | 2.59 |
-| literature           |   264 | Abweichung | literature           |  263 | 1.70 |
-| love                 |   150 | ok         | love                 |  150 | 0.97 |
-| magic                |    30 | ok         | magic                |   30 | 0.19 |
-| medicine             |    74 | ok         | medicine             |   74 | 0.48 |
-| men-women            |   583 | ok         | men-women            |  583 | 3.76 |
-| miscellaneous        |   651 | ok         | miscellaneous        |  651 | 4.20 |
-| news                 |    53 | ok         | news                 |   53 | 0.34 |
-| paradoxum            |    72 | ok         | paradoxum            |   72 | 0.46 |
-| people               |  1251 | Abweichung | people               | 1250 | 8.07 |
-| perl                 |   273 | ok         | perl                 |  273 | 1.76 |
-| pets                 |    52 | ok         | pets                 |   52 | 0.34 |
-| platitudes           |   498 | ok         | platitudes           |  498 | 3.21 |
-| politics             |   704 | ok         | politics             |  704 | 4.54 |
-| pratchett            |     3 | ok         | pratchett            |    3 | 0.02 |
-| riddles              |   127 | ok         | riddles              |  127 | 0.82 |
-| science              |   626 | ok         | science              |  626 | 4.04 |
-| shlomif-fav          |   247 | ok         | shlomif-fav          |  247 | 1.59 |
-| songs-poems          |   720 | ok         | songs-poems          |  720 | 4.64 |
-| sports               |   147 | ok         | sports               |  147 | 0.95 |
-| startrek             |   227 | ok         | startrek             |  227 | 1.46 |
-| tao                  |    82 | ok         | tao                  |   82 | 0.53 |
-| the-x-files-taglines |    25 | ok         | the-x-files-taglines |   25 | 0.16 |
-| translate-me         |    12 | ok         | translate-me         |   12 | 0.08 |
-| wisdom               |   432 | ok         | wisdom               |  432 | 2.79 |
-| work                 |   630 | ok         | work                 |  630 | 4.06 |
-| zippy                |   548 | ok         | zippy                |  548 | 3.54 |
-|----------------------+-------+------------+----------------------+------+------|
-| Summe                | 15501 |            |                      |      |      |
-#+TBLFM: @2$3..@II$3=if($2==$5,ok,Abweichung)::$6=$2*100/@46$2;f2::@46$2=vsum(@I..II)
+#+begin_src emacs-lisp :exports none :var categories=categories()
+(let ((cats (json-parse-string categories)))
+  (mapcar (lambda (key) (list key (gethash key cats))) (sort (hash-table-keys cats))))
+#+end_src
+
+#+RESULTS:
+| art                  |  474 |
+| ascii-art            |   10 |
+| computers            | 1066 |
+| cookie               | 1134 |
+| debian               |   85 |
+| definitions          | 1203 |
+| disclaimer           |  284 |
+| drugs                |  207 |
+| education            |  205 |
+| ethnic               |  162 |
+| food                 |  196 |
+| fortunes             |  431 |
+| goedel               |   52 |
+| humorists            |  197 |
+| kids                 |  151 |
+| knghtbrd             |  539 |
+| law                  |  206 |
+| linux                |  398 |
+| literature           |  260 |
+| love                 |  150 |
+| magic                |   30 |
+| medicine             |   74 |
+| men-women            |  581 |
+| miscellaneous        |  644 |
+| news                 |   52 |
+| paradoxum            |   70 |
+| people               | 1244 |
+| perl                 |  272 |
+| pets                 |   51 |
+| platitudes           |  496 |
+| politics             |  697 |
+| pratchett            |    3 |
+| riddles              |  127 |
+| science              |  622 |
+| shlomif-fav          |  247 |
+| songs-poems          |  707 |
+| sports               |  146 |
+| startrek             |  228 |
+| tao                  |   82 |
+| the-x-files-taglines |   25 |
+| translate-me         |   12 |
+| wisdom               |  427 |
+| work                 |  626 |
+| zippy                |  546 |
+
+Die Daten in der aktuellen Spalte sind aus dem Commit
+[[https://github.com/BerndPaffenholz/fortune-mod/commit/0bebaf6c30c0fc130223678b047139c57d9b6608][0bebaf6c30c0fc130223678b047139c57d9b6608]]
+
+| vorher               |      | Status     | aktuell              |       |    % |
+|----------------------+------+------------+----------------------+-------+------|
+| art                  |  474 | ok         | art                  |   474 | 3.07 |
+| ascii-art            |   10 | ok         | ascii-art            |    10 | 0.06 |
+| computers            | 1065 | Abweichung | computers            |  1066 | 6.91 |
+| cookie               | 1146 | Abweichung | cookie               |  1134 | 7.35 |
+| debian               |   85 | ok         | debian               |    85 | 0.55 |
+| definitions          | 1203 | ok         | definitions          |  1203 | 7.80 |
+| disclaimer           |  284 | ok         | disclaimer           |   284 | 1.84 |
+| drugs                |  207 | ok         | drugs                |   207 | 1.34 |
+| education            |  205 | ok         | education            |   205 | 1.33 |
+| ethnic               |  162 | ok         | ethnic               |   162 | 1.05 |
+| food                 |  197 | Abweichung | food                 |   196 | 1.27 |
+| fortunes             |  431 | ok         | fortunes             |   431 | 2.80 |
+| goedel               |   53 | Abweichung | goedel               |    52 | 0.34 |
+| humorists            |  198 | Abweichung | humorists            |   197 | 1.28 |
+| kids                 |  151 | ok         | kids                 |   151 | 0.98 |
+| knghtbrd             |  540 | Abweichung | knghtbrd             |   539 | 3.50 |
+| law                  |  206 | ok         | law                  |   206 | 1.34 |
+| linux                |  402 | Abweichung | linux                |   398 | 2.58 |
+| literature           |  263 | Abweichung | literature           |   260 | 1.69 |
+| love                 |  150 | ok         | love                 |   150 | 0.97 |
+| magic                |   30 | ok         | magic                |    30 | 0.19 |
+| medicine             |   74 | ok         | medicine             |    74 | 0.48 |
+| men-women            |  583 | Abweichung | men-women            |   581 | 3.77 |
+| miscellaneous        |  651 | Abweichung | miscellaneous        |   644 | 4.18 |
+| news                 |   53 | Abweichung | news                 |    52 | 0.34 |
+| paradoxum            |   72 | Abweichung | paradoxum            |    70 | 0.45 |
+| people               | 1250 | Abweichung | people               |  1244 | 8.07 |
+| perl                 |  273 | Abweichung | perl                 |   272 | 1.76 |
+| pets                 |   52 | Abweichung | pets                 |    51 | 0.33 |
+| platitudes           |  498 | Abweichung | platitudes           |   496 | 3.22 |
+| politics             |  704 | Abweichung | politics             |   697 | 4.52 |
+| pratchett            |    3 | ok         | pratchett            |     3 | 0.02 |
+| riddles              |  127 | ok         | riddles              |   127 | 0.82 |
+| science              |  626 | Abweichung | science              |   622 | 4.03 |
+| shlomif-fav          |  247 | ok         | shlomif-fav          |   247 | 1.60 |
+| songs-poems          |  720 | Abweichung | songs-poems          |   707 | 4.59 |
+| sports               |  147 | Abweichung | sports               |   146 | 0.95 |
+| startrek             |  227 | Abweichung | startrek             |   228 | 1.48 |
+| tao                  |   82 | ok         | tao                  |    82 | 0.53 |
+| the-x-files-taglines |   25 | ok         | the-x-files-taglines |    25 | 0.16 |
+| translate-me         |   12 | ok         | translate-me         |    12 | 0.08 |
+| wisdom               |  432 | Abweichung | wisdom               |   427 | 2.77 |
+| work                 |  630 | Abweichung | work                 |   626 | 4.06 |
+| zippy                |  548 | Abweichung | zippy                |   546 | 3.54 |
+|----------------------+------+------------+----------------------+-------+------|
+|                      |      | Summe      | 44                   | 15419 |  100 |
+#+TBLFM: @2$3..@II$3=if($5==$2,ok,Abweichung)::$6=$5*100/@46$5;f2::@46$5=vsum(@I..II)::@46$4=vlen(@I..II)
 
 *** Aufruf mit den Daten des GitHub-Webhook                        :noexport:
 
@@ -1535,6 +1558,7 @@ im Webhook genutzt um die übergebenen Informationen von GitHub zu prüfen.
 Implementierung der [[*Webhook][Webhooks]] nach diesen [[*Webhooks Test][Experimenten]].
 
 ** TODO Dokumentation verbessern
+
 * Deploy to target
 
 Der Deploy-Prozesse zieht =fortune= immer aus dem Docker Hub. Daher
@@ -1542,7 +1566,7 @@ ist nach der Fertigstellung das Image zu pushen. Dies funktioniert
 nur, wenn man im Docker Desktop mit einem Account eigeloggt ist.
 
 #+begin_src bash :results silent
-docker image push -q berndpaffenholz/fortune:1.6.4
+docker image push -q berndpaffenholz/fortune:1.6.5
 #+end_src
 
 Aktualisieren der Dateien (compose yaml und sonstige), refresh aller
