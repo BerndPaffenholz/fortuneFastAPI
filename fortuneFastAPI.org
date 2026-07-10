@@ -6,11 +6,10 @@
 #+HUGO_SECTION: de/Tools
 #+HUGO_AUTO_SET_LASTMOD: t
 #+PROPERTY: header-args:python :comments link
-#+HTML_HEAD: <link rel="stylesheet" type="text/css" href="https://orgmode.org/worg/style/worg.css"/>
-#+HTML_HEAD: <style>html {background-image: none;}</style>
 #+HUGO_FRONT_MATTER_FORMAT: yaml
 #+HUGO_DRAFT: true
 #+HUGO_CUSTOM_FRONT_MATTER: :disable_share true
+#+OPTIONS: toc:2
 
 * Motivation
 
@@ -43,7 +42,7 @@ Datenbankzugriffe implementiert.
 
 Alle Module liegen in der Domäne ~app~.
 
-#+HEADER: :file "./fortuneFastAPI_struct.svg"
+#+HEADER: :file "fortuneFastAPI_struct.svg"
 #+HEADER: :results output file link
 #+HEADER: :headers '("\\usepackage{tikz} \\usetikzlibrary{shapes.geometric,fit}")
 #+BEGIN_src latex :exports results
@@ -60,7 +59,7 @@ Alle Module liegen in der Domäne ~app~.
 #+end_src
 
 #+RESULTS:
-[[file:./fortuneFastAPI_struct.svg]]
+[[file:fortuneFastAPI_struct.svg]]
 
 #+BEGIN_SRC plantuml :file fortunFastAPI_packages.svg
 @startuml
@@ -97,7 +96,7 @@ Die Definition und Dokumentation der REST-Schnittstelle erfolgt über
 Annotationen, Dokumentationskommentare und den Aufruf von ~FastAPI~.
 #+begin_src python :tangle "build/app/main.py" :noweb tangle
 DESCRIPTION="""Every one goes with a quote.
-See <a href="https://linux.die.net/man/6/fortune">fortune</a>.
+See <a href="https://man.freebsd.org/cgi/man.cgi?query=fortune&apropos=0&sektion=6&manpath=FreeBSD+15.0-RELEASE+and+Ports.quarterly&format=html">fortune</a>.
 Quotes are from <a href="https://github.com/BerndPaffenholz/fortune-mod.git">here</a>
 which is a clone from <a href="https://github.com/shlomif/fortune-mod">fortune-mod</a>.
 The fortunes from directory <code>off</code> are omitted.
@@ -108,11 +107,11 @@ app = FastAPI(
     description=DESCRIPTION,
     summary="Cool sayings for everyone.",
     version="1.6",
-    #terms_of_service="http://paffi.org/impressum/",
+    #terms_of_service="https://www.p4ffi.de/Impressum.html",
     contact={
         "name": "Bernd Paffenholz",
-        "url": "https://paffi.org/de/impressum/",
-        "email": "kontakt@paffi.org",
+        "url": "https://www.p4ffi.de/Impressum.html",
+        "email": "kontakt@p4ffi.de",
     },
     license_info={
         "name": "GPLv3",
@@ -292,7 +291,11 @@ from pymongo import MongoClient
 
 log = logging.getLogger("fortunes")
 
-mongodb = MongoClient("mongodb://mongo:27017/",username="root",password="example")
+with open('/run/secrets/mongo',mode='r') as file:
+    username = file.readline().strip()
+    password = file.readline().strip()
+
+mongodb = MongoClient("mongodb://mongo:27017/",username=username,password=password)
 DATABASENAME = "fortune"
 citesdb = mongodb[DATABASENAME].sayings
 confdb = mongodb[DATABASENAME].config
@@ -327,16 +330,17 @@ def init_app(_app):
     return True
 #+end_src
 
-#+RESULTS:
-
-#+begin_src python :dir "/docker:build-fortune-1:/" :exports none
+# Statt MongoExpress:
+#+begin_comment
+,#+begin_src python :dir "/docker:build-fortune-1:/" :exports none
 from pymongo import MongoClient
-client = MongoClient("mongodb://mongo:27017/",username="root",password="example");
+client = MongoClient("mongodb://mongo:27017/",username="*",password="*");
 return client.fortune.config.find_one({"name":"git-commit-id"})
-#+end_src
+,#+end_src
 
-#+RESULTS:
+,#+RESULTS:
 | _id | : | ObjectId | (64c024e38b8067ce81b63c62) | name | : | git-commit-id | value | : | 8a80f31e5aadce61265ac37edd8ede21a6538a4a\n |
+#+end_comment
 
 ** Refresh der Datenbank
 
@@ -484,13 +488,17 @@ Zum Start des Mechanismus von Celery muss der Server gestartet werden:
 celery multi start -A app.tasks worker -B -s /var/log/celery/celerybeat-schedule --loglevel=<<loglevel>>
 #+end_src
 
-Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt (Block =pre-start=).
+Dieses Kommando wird vor dem Start der eigenlichen Anwendung ausgeführt (Block =<<pre-start>>=).
+
+*** Anpassung an RabbitMQ 4.3
+
+Diese Anpassung ist [[https://github.com/celery/kombu/issues/2237][in Arbeit]]. Bis zur Umsetzung muss RabbitMQ 4.2 benutzt werden.
 
 * Statische Seite
 
 ** Deklaration in der Anwendung
 
-Die Referenz =Mount static files= bindet den folgenden Code ein:
+Die Referenz =<<Mount static files>>= bindet den folgenden Code ein:
 
 #+begin_src python :noweb-ref "Mount static files"
 from fastapi.staticfiles import StaticFiles
@@ -536,7 +544,7 @@ celery
 Das =dockerfile= für Python und die Anwendung.
 
 #+begin_src dockerfile :tangle "build/dockerfile"
-FROM python:3.13-alpine
+FROM python:3.14-alpine
 RUN apk add --no-cache git
 WORKDIR /code
 COPY ./requirements.txt /code/requirements.txt
@@ -557,15 +565,15 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 Nun tanglen wir diese Datei und bauen dann ein Image
 
 #+begin_src bash :dir build
-docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.5 .
+docker build --quiet --force-rm --platform=linux/amd64 --tag berndpaffenholz/fortune:1.6.6 .
 #+end_src
 #+RESULTS:
-: sha256:2e7966bae3fcb66b3e1b2684928a8aa9bb78792bfab3dfa8f829894d2973e441
+: sha256:3a9d8b33e611ee4980bc3eb24917fab9cefa1436f19966d2cf6f9248a3a5f0b5
 
 *** Zum Ausprobieren                                               :noexport:
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.5
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.6
 #+end_src
 
 #+RESULTS:
@@ -585,6 +593,53 @@ docker ps
 ** compose-Datei
 
 Jetzt das Ganze als compose-Datei.
+Siehe auch [[*Anpassung an RabbitMQ 4.3][Anpassung an RabbitMQ 4.3]].
+
+Wenn das Passwort für MongoDB geändert werden soll, dann muss das
+Volume =datastore= gelöscht werden, sonst wird die Datenbank nicht neu
+angelegt.
+
+Die Passworte stehen in den Dateien =mongo.env=, =mongosexpress.env=
+und =mongosecrets= im =build=-Verzeichnis.
+
+Datei =mongo.env=:
+#+begin_src conf :tangle build/mongo.env :noweb tangle
+MONGO_INITDB_ROOT_USERNAME=<<username()>>
+MONGO_INITDB_ROOT_PASSWORD=<<password()>>
+#+end_src
+
+Datei =mongoexpress.env=:
+#+begin_src conf :tangle build/mongoexpress.env :noweb tangle
+ME_CONFIG_MONGODB_URL="mongodb://<<username()>>:<<password()>>@mongo:27017/"
+#+end_src
+
+Die Datei =mongosecrets= enthält die tatsächlichen Credentials:
+#+begin_example conf
+username
+password
+#+end_example
+
+Diese beiden Blocks, ~username~ und ~password~, extrahieren die
+Credentials aus der Datei.
+#+NAME: username
+#+begin_src emacs-lisp
+(with-temp-buffer
+  (insert-file-contents "build/mongosecrets")
+  (elt (split-string (buffer-string)) 0))
+#+end_src
+
+#+RESULTS: username
+: admin
+
+#+NAME: password
+#+begin_src emacs-lisp
+(with-temp-buffer
+  (insert-file-contents "build/mongosecrets")
+  (elt (split-string (buffer-string)) 1))
+#+end_src
+
+Die Datei mit den Credentials ist nicht im Repository und muss selbst
+angelegt werden.
 
 #+begin_src docker-compose :tangle build/docker-compose.yml :noweb yes
 services:
@@ -599,14 +654,12 @@ services:
       interval: 10s
       timeout: 3s
       retries: 5
-    environment:
-      MONGO_INITDB_ROOT_USERNAME: root
-      MONGO_INITDB_ROOT_PASSWORD: example
+    env_file: mongo.env
     volumes:
       - "datastore:/data/db"
 
   rabbitmq:
-    image: rabbitmq
+    image: rabbitmq:4.2
     restart: always
     healthcheck:
       test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
@@ -619,7 +672,7 @@ services:
       - "./rabbitmq/50-timeout.conf:/etc/rabbitmq/conf.d/50-timeout.conf"
 
   fortune:
-    image: berndpaffenholz/fortune:1.6.5
+    image: berndpaffenholz/fortune:1.6.6
     restart: always
     build: .
     networks:
@@ -627,6 +680,7 @@ services:
       - behind-proxy
     secrets:
       - github
+      - mongo
     volumes:
       - "./static:/static"
     labels:
@@ -648,6 +702,8 @@ services:
 secrets:
   github:
     file: ./secrets
+  mongo:
+    file: ./mongosecrets
 
 volumes:
   datastore:
@@ -696,7 +752,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
-    image: berndpaffenholz/fortune:1.6.5
+    image: berndpaffenholz/fortune:1.6.6
     ports:
       - "80:80"
 #+end_src
@@ -714,18 +770,23 @@ services:
       - fortune
     ports:
       - "8081:8081"
-    environment:
-      ME_CONFIG_MONGODB_ADMINUSERNAME: root
-      ME_CONFIG_MONGODB_ADMINPASSWORD: example
-      ME_CONFIG_MONGODB_URL: "mongodb://root:example@mongo:27017/"
+    env_file: mongoexpress.env
+#+end_src
+
+Und den Port von =mongo= freigeben:
+#+begin_src docker-compose :tangle build/docker-compose-test-mongo-direct.yml
+services:
+  mongo:
+    ports:
+      - "27017:27017"
 #+end_src
 
 Der Start der Container erfolgt mit den Testhilfen und zuvor wird
 gebaut, wenn notwendig.
 # Das tangeln erfolgt hier automatisch
 #+begin_src bash :dir build :results none :prologue (ignore (org-babel-tangle))
-docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml \
-       up --detach --build --quiet-pull
+docker compose -f docker-compose.yml -f docker-compose-test.yml -f docker-compose-test-mongo.yml -f docker-compose-test-mongo-direct.yml \
+       up --detach --build --quiet-pull --pull always
 #+end_src
 
 #+RESULTS:
@@ -751,11 +812,11 @@ GET https://api.p4ffi.de/fortunes/v1
 #+RESULTS:
 : HTTP/2 200 
 : content-type: application/json
-: date: Sat, 04 May 2024 19:11:06 GMT
+: date: Tue, 10 Mar 2026 23:26:39 GMT
 : server: uvicorn
-: content-length: 62
+: content-length: 232
 : 
-: {"text":"Serfs up!\n\t\t-- Spartacus\n","category":"politics"}
+: {"text":"When Alexander Graham Bell died in 1922, the telephone people interrupted\nservice for one minute in his honor.  They've been honoring him intermittently\never since, I believe.\n\t\t-- The Grab Bag\n","category":"science"}
 
 #+begin_src http
 GET http://localhost:80/fortunes/v1
@@ -763,12 +824,12 @@ GET http://localhost:80/fortunes/v1
 
 #+RESULTS:
 : HTTP/1.1 200 OK
-: date: Sat, 04 May 2024 23:39:38 GMT
+: date: Tue, 10 Mar 2026 23:28:02 GMT
 : server: uvicorn
-: content-length: 329
+: content-length: 76
 : content-type: application/json
 : 
-: {"text":"<Culus> dhd:  R you part of the secret debian overstructure?\n<dhd> no. there is no secret debian overstructure.\n<CosmicRay> although, now that somebody brought it up, let's start one\n            :-)\n<Knghtbrd> CosmicRay - why not, sounds like a fun way to spend the\n           afternoon =D\n","category":"knghtbrd"}
+: {"text":"I have become me without my consent.\n","category":"miscellaneous"}
 
 #+NAME: categories
 #+begin_src http :exports code :pretty 
@@ -931,12 +992,7 @@ Die Daten in der aktuellen Spalte sind aus dem Commit
 
 *** Aufruf mit den Daten des GitHub-Webhook                        :noexport:
 
-#+NAME: geheimnis
-#+begin_src elisp :results silent :exports none
-(mapconcat 'identity (seq-take (auth-source-user-and-password "api.p4ffi.de") 2) ":")
-#+end_src
-
-#+begin_src http :user (org-sbe "geheimnis")
+#+begin_src http
 POST http://localhost/fortunes/v1
 Accept: */*
 User-Agent: GitHub-Hookshot/a778e6c
@@ -1561,12 +1617,12 @@ Implementierung der [[*Webhook][Webhooks]] nach diesen [[*Webhooks Test][Experim
 
 * Deploy to target
 
-Der Deploy-Prozesse zieht =fortune= immer aus dem Docker Hub. Daher
-ist nach der Fertigstellung das Image zu pushen. Dies funktioniert
-nur, wenn man im Docker Desktop mit einem Account eigeloggt ist.
+Der Deploy-Prozess zieht =fortune= immer aus dem Docker Hub. Daher ist
+nach der Fertigstellung das Image zu pushen. Dies funktioniert nur,
+wenn man im Docker Desktop mit einem Account eigeloggt ist.
 
 #+begin_src bash :results silent
-docker image push -q berndpaffenholz/fortune:1.6.5
+docker image push -q berndpaffenholz/fortune:1.6.6
 #+end_src
 
 Aktualisieren der Dateien (compose yaml und sonstige), refresh aller
