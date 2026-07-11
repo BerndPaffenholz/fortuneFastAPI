@@ -1,0 +1,8 @@
+Dies ist der komplette Quellcode für [[https://api.p4ffi.de/docs#/][Fortune - Cookies]]. Dort ist auch
+die [[https://www.p4ffi.de/fortuneFastAPI.html][aufbereitete Doku]].
+
+Um den Code und die Doku zu erzeugen benötigt man [[https://www.gnu.org/software/emacs/][emacs]] und [[https://orgmode.org][orgmode]].
+
+Dieses Programm ist freie Software und lizensiert nach [[https://www.gnu.org/licenses/gpl-3.0][GPLv3 oder
+höher.]] Siehe [[file:LICENSE][LICENSE]].
+
