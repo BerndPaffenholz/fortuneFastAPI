@@ -299,6 +299,7 @@ mongodb = MongoClient("mongodb://mongo:27017/",username=username,password=passwo
 DATABASENAME = "fortune"
 citesdb = mongodb[DATABASENAME].sayings
 confdb = mongodb[DATABASENAME].config
+log.warning("Mongo init ok.")
 
 def close_db(_e=None):
     if mongodb is not None:
@@ -568,7 +569,7 @@ Nun tanglen wir diese Datei und bauen dann ein Image
 docker build --quiet --force-rm --platform=linux/amd64 --tag berndpaffenholz/fortune:1.6.6 .
 #+end_src
 #+RESULTS:
-: sha256:3a9d8b33e611ee4980bc3eb24917fab9cefa1436f19966d2cf6f9248a3a5f0b5
+: sha256:f6827223a4f5520e383564dc08a7cdd1cebee4889aa9447838f3c446338fadba
 
 *** Zum Ausprobieren                                               :noexport:
 
@@ -1630,6 +1631,7 @@ Images und Neustart aller Container.
 
 #+begin_src bash :results silent :var not_needed=(org-babel-tangle)
 scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
+scp -p build/mongo.env build/mongosecrets build/secrets bernd@p4ffi.de:/home/bernd/develop/fortune
 scp -pr build/static bernd@p4ffi.de:/home/bernd/develop/fortune
 scp -pr build/rabbitmq bernd@p4ffi.de:/home/bernd/develop/fortune
 ssh bernd@p4ffi.de "cd /home/bernd/develop/fortune && docker compose up --force-recreate --quiet-pull --pull always -d"
