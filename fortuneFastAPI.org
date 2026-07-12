@@ -29,7 +29,7 @@ Copyright 2026 Bernd Paffenholz.
 
 Diese Datei ist lizensiert nach [[https://www.gnu.org/licenses/gpl-3.0][GPLv3 oder höher]].
 
-Der Quelltext ist bei [[https://github.com/BerndPaffenholz/fortuneFastAPI/blob/master/fortuneFastAPI.org][github]] bereitgestellt.
+Der Quelltext ist bei [[https://github.com/BerndPaffenholz/fortuneFastAPI/blob/master/fortuneFastAPI.org?plain=1][github]] bereitgestellt.
 
 
 
