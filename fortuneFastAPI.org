@@ -23,6 +23,44 @@ Bereitstellen von "fortunes" zu finden, habe ich einen selbst erstellt.
 Es gibt das Programm [[https://linux.die.net/man/6/fortune][=fortune(6)=]], aber das ist nicht immer
 installiert. Außerdem wollte ich einen Service programmieren.
 
+* Copyright, Lizenz und Quelltext
+
+Copyright 2026 Bernd Paffenholz.
+
+Diese Datei ist lizensiert nach [[https://www.gnu.org/licenses/gpl-3.0][GPLv3 oder höher]].
+
+Der Quelltext ist bei [[https://github.com/BerndPaffenholz/fortuneFastAPI/blob/master/fortuneFastAPI.org][github]] bereitgestellt.
+
+
+
+#+begin_comment
+    This program is free software: you can redistribute it and/or modify
+    it under the terms of the GNU General Public License as published by
+    the Free Software Foundation, either version 3 of the License, or
+    (at your option) any later version.
+
+    This program is distributed in the hope that it will be useful,
+    but WITHOUT ANY WARRANTY; without even the implied warranty of
+    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+    GNU General Public License for more details.
+
+    You should have received a copy of the GNU General Public License
+    along with this program.  If not, see <http://www.gnu.org/licenses/>.
+
+    Dieses Programm ist Freie Software: Sie können es unter den Bedingungen
+    der GNU General Public License, wie von der Free Software Foundation,
+    Version 3 der Lizenz oder (nach Ihrer Wahl) jeder neueren
+    veröffentlichten Version, weiter verteilen und/oder modifizieren.
+
+    Dieses Programm wird in der Hoffnung bereitgestellt, dass es nützlich sein wird, jedoch
+    OHNE JEDE GEWÄHR,; sogar ohne die implizite
+    Gewähr der MARKTFÄHIGKEIT oder EIGNUNG FÜR EINEN BESTIMMTEN ZWECK.
+    Siehe die GNU General Public License für weitere Einzelheiten.
+
+    Sie sollten eine Kopie der GNU General Public License zusammen mit diesem
+    Programm erhalten haben. Wenn nicht, siehe <https://www.gnu.org/licenses/>.
+#+end_comment
+
 * Lösung
 
 Die Datenbasis sollte die gleiche wie für das Programm =fortune=
