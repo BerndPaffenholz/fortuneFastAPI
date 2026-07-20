@@ -10,6 +10,9 @@
 #+HUGO_DRAFT: true
 #+HUGO_CUSTOM_FRONT_MATTER: :disable_share true
 #+OPTIONS: toc:2
+#+LATEX_HEADER: \usepackage{svg} \usepackage{german}
+#+LATEX_HEADER: \setlength{\parindent}{0pt }
+#+LATEX_HEADER: \setlength{\parskip}{\baselineskip}
 
 * Motivation
 
@@ -24,14 +27,24 @@ Es gibt das Programm [[https://linux.die.net/man/6/fortune][=fortune(6)=]], aber
 installiert. Außerdem wollte ich einen Service programmieren.
 
 * Copyright, Lizenz und Quelltext
+#+BEGIN_COMMENT
+Trick abgeschaut von [[https://orgmode.org/worg/org-contrib/babel/languages/ob-doc-org.html#org4653b23][Worg example]]. Damit muss das Copyright nur einmal
+angepasst werden und kann dann in allen Outputs genutzt werden.
+#+END_COMMENT
 
+#+NAME: copyright
+#+begin_src org :exports none :noweb yes
 Copyright 2026 Bernd Paffenholz.
+#+end_src
 
-Diese Datei ist lizensiert nach [[https://www.gnu.org/licenses/gpl-3.0][GPLv3 oder höher]].
+#+NAME: print-org
+#+begin_src elisp :var x=copyright() :exports none :results raw
+  (print x)
+#+end_src
 
-Der Quelltext ist bei [[https://github.com/BerndPaffenholz/fortuneFastAPI/blob/master/fortuneFastAPI.org?plain=1][github]] bereitgestellt.
-
-
+- call_print-org(x=copyright())
+- Diese Datei ist lizensiert nach [[https://www.gnu.org/licenses/gpl-3.0][GPLv3 oder höher]].
+- Der Quelltext ist bei [[https://github.com/BerndPaffenholz/fortuneFastAPI/blob/master/fortuneFastAPI.org?plain=1][github]] bereitgestellt.
 
 #+begin_comment
     This program is free software: you can redistribute it and/or modify
@@ -60,6 +73,17 @@ Der Quelltext ist bei [[https://github.com/BerndPaffenholz/fortuneFastAPI/blob/m
     Sie sollten eine Kopie der GNU General Public License zusammen mit diesem
     Programm erhalten haben. Wenn nicht, siehe <https://www.gnu.org/licenses/>.
 #+end_comment
+
+#+begin_src text :noweb-ref cr :exports none :noweb yes
+<<copyright>>
+
+This program is distributed in the hope that it will be useful,
+but WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+GNU General Public License for more details.
+
+Full terms and documentation see https://github.com/BerndPaffenholz/fortuneFastAPI.
+#+end_src
 
 * Lösung
 
@@ -112,6 +136,10 @@ package app {
 
 #+RESULTS:
 [[file:fortunFastAPI_packages.svg]]
+
+#+begin_src text :exports none  :tangle "build/app/main.py" :noweb yes
+# <<cr>>
+#+end_src
 
 #+begin_src python :tangle "build/app/main.py" :noweb tangle
 from app.tasks import run_update_db
@@ -243,6 +271,10 @@ Dekoration eines Rest-Endpunktes.
 Da ein Webhook der Aufruf einer [[webhook_use][Rest-Schnittstelle]] ist, wird die
 Funktionalität als [[https://docs.python.org/3/reference/compound_stmts.html#function][Dekorator]] ausgeführt.
 
+#+begin_src text :exports none  :tangle "build/app/webhook.py" :noweb yes
+# <<cr>>
+#+end_src
+
 #+begin_src python :tangle "build/app/webhook.py" :noweb tangle
 import logging
 from typing import List, Any
@@ -319,6 +351,10 @@ Im Modul ~cites~ sind die Zugriffe auf die Datenbank
 zusammengefasst. Die wesentlichen Funktionen sind das Auswählen eines
 zufälligen Datensatzes durch ~find_one~ und eine Liste der Kategorien
 mit Anzahl der darin enthaltenen Sätze (~list_categories~).
+
+#+begin_src text :exports none  :tangle "build/app/cites.py" :noweb yes
+# <<cr>>
+#+end_src
 
 #+begin_src python :tangle "build/app/cites.py" :noweb tangle
 import logging
@@ -448,6 +484,10 @@ def update_git_commit_id ():
 :header-args:python: :tangle build/app/tasks.py
 :END:
 
+#+begin_src python :exports none :noweb yes
+# <<cr>>
+#+end_src
+
 Die python-Code-Stücke für die Steuerung von Celery werden in die
 Datei call_tangle_file_name("python") geschrieben.
 
@@ -556,8 +596,11 @@ Die Datei =favicon.ico= wurde mit einem Generator erstellt.
 
 Dieser Code ist inspiriert durch [[https://leanrada.com/htmz][htmz]], ein minimales Snippet zum Nachladen von Daten.
 
-#+begin_src html :tangle build/static/index.html
+#+begin_src html :tangle build/static/index.html :noweb yes
 <!DOCTYPE html>
+<!--
+  <<cr>>
+-->
 <html>
   <head><title>Fortunes</title></head>
   <body>
@@ -596,7 +639,11 @@ CMD ["app/start.sh"]
 
 Die Startdatei =app/start.sh=:
 
-#+begin_src bash :shebang "#!/bin/sh" :tangle "build/app/start.sh" :noweb tangle
+#+begin_src text :shebang "#!/bin/sh" :exports none  :tangle "build/app/start.sh" :noweb yes
+# <<cr>>
+#+end_src
+
+#+begin_src bash :tangle "build/app/start.sh" :noweb tangle
 <<pre-start>>
 uvicorn app.main:app --host 0.0.0.0 --port 80
 #+end_src
@@ -679,6 +726,10 @@ Credentials aus der Datei.
 
 Die Datei mit den Credentials ist nicht im Repository und muss selbst
 angelegt werden.
+
+#+begin_src text :exports none  :tangle "build/docker-compose.yml" :noweb yes
+# <<cr>>
+#+end_src
 
 #+begin_src docker-compose :tangle build/docker-compose.yml :noweb yes
 services:
