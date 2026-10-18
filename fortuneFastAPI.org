@@ -626,7 +626,7 @@ celery
 Das =dockerfile= für Python und die Anwendung.
 
 #+begin_src dockerfile :tangle "build/dockerfile"
-FROM python:3.14-alpine
+FROM python:3.15-alpine
 RUN apk add --no-cache git
 WORKDIR /code
 COPY ./requirements.txt /code/requirements.txt
@@ -650,16 +650,25 @@ uvicorn app.main:app --host 0.0.0.0 --port 80
 
 Nun tanglen wir diese Datei und bauen dann ein Image
 
+# I run a MBP with Apple Silicon. 
+#+begin_src bash :dir build :exports none
+docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.9 .
+#+end_src
+
+#+RESULTS:
+: sha256:55b292127259ce30d97354dc9b19367c1777f592e3a273142a2e0499406bc84f
+
+# For running on my external server use the this block.
 #+begin_src bash :dir build
-docker build --quiet --force-rm --platform=linux/amd64 --tag berndpaffenholz/fortune:1.6.7 .
+docker build --quiet --force-rm --platform=linux/amd64 --tag berndpaffenholz/fortune:1.6.9 .
 #+end_src
 #+RESULTS:
-: sha256:c153bd002adec8974e151f14a344fccb580d6acf5c62447e6ead065c57539555
+: sha256:f8779c8e1347eef049412521a6d2fafd6468aab36de7a0cd4f28bd25c40d0dad
 
 *** Zum Ausprobieren                                               :noexport:
 
 #+begin_src bash
-docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.7
+docker run --detach --publish 8000:80 berndpaffenholz/fortune:1.6.9
 #+end_src
 
 #+RESULTS:
@@ -759,7 +768,7 @@ services:
       - "./rabbitmq/50-timeout.conf:/etc/rabbitmq/conf.d/50-timeout.conf"
 
   fortune:
-    image: berndpaffenholz/fortune:1.6.7
+    image: berndpaffenholz/fortune:1.6.9
     restart: always
     build: .
     networks:
@@ -839,7 +848,7 @@ werden kann:
 #+begin_src docker-compose :tangle build/docker-compose-test.yml :noweb yes
 services:
   fortune:
-    image: berndpaffenholz/fortune:1.6.7
+    image: berndpaffenholz/fortune:1.6.9
     ports:
       - "80:80"
 #+end_src
@@ -1709,7 +1718,7 @@ nach der Fertigstellung das Image zu pushen. Dies funktioniert nur,
 wenn man im Docker Desktop mit einem Account eigeloggt ist.
 
 #+begin_src bash :results silent
-docker image push -q berndpaffenholz/fortune:1.6.7
+docker image push -q berndpaffenholz/fortune:1.6.9
 #+end_src
 
 Aktualisieren der Dateien (compose yaml und sonstige), refresh aller
