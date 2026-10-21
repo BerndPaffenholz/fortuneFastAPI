@@ -502,7 +502,9 @@ from celery.utils.log import get_task_logger
 import app.cites as cites
 
 app = Celery('tasks', backend='rpc://guest@rabbitmq', broker='pyamqp://guest@rabbitmq//')
+app.conf.enable_utc=True,
 app.conf.timezone = 'Europe/Berlin'
+
 logger = get_task_logger("fortunes")
 
 @app.on_after_configure.connect
@@ -663,7 +665,7 @@ docker build --quiet --force-rm --tag berndpaffenholz/fortune:1.6.9 .
 docker build --quiet --force-rm --platform=linux/amd64 --tag berndpaffenholz/fortune:1.6.9 .
 #+end_src
 #+RESULTS:
-: sha256:f8779c8e1347eef049412521a6d2fafd6468aab36de7a0cd4f28bd25c40d0dad
+: sha256:69f4c4b833323a76e9bd28d1dea605545a56ed3288e4026f8eadf37b76d45171
 
 *** Zum Ausprobieren                                               :noexport:
 
@@ -1723,6 +1725,9 @@ docker image push -q berndpaffenholz/fortune:1.6.9
 
 Aktualisieren der Dateien (compose yaml und sonstige), refresh aller
 Images und Neustart aller Container.
+
+Vor dem Tanglen muss =mongosecrets= mit den Produktionsdaten bestückt werden.
+Ändern sich diese, sind die Volumes von =mongo= zu löschen.
 
 #+begin_src bash :results silent :var not_needed=(org-babel-tangle)
 scp -p build/docker-compose.yml bernd@p4ffi.de:/home/bernd/develop/fortune
